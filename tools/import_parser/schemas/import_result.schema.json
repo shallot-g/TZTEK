@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "TZTEK import parser result",
+  "type": "object",
+  "required": ["sourceType", "filePath", "rawElements", "structuredItems"],
+  "properties": {
+    "sourceType": {
+      "type": "string",
+      "enum": ["Drawing2D", "Model3D"]
+    },
+    "filePath": {
+      "type": "string"
+    },
+    "rawElements": {
+      "type": "array"
+    },
+    "structuredItems": {
+      "type": "object",
+      "required": ["primitives", "tolerances", "links", "uncertainItems"],
+      "properties": {
+        "primitives": { "type": "array" },
+        "tolerances": { "type": "array" },
+        "links": { "type": "array" },
+        "datums": { "type": "array" },
+        "coordinateSystems": { "type": "array" },
+        "uncertainItems": { "type": "array" }
+      }
+    }
+  }
+}

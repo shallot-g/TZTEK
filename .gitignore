@@ -1,0 +1,29 @@
+# Build outputs
+bin/
+obj/
+
+# IDE files
+.vs/
+.vscode/
+*.user
+*.suo
+
+# Python sidecar local state
+tools/import_parser/.venv/
+tools/import_parser/__pycache__/
+tools/import_parser/output/
+tools/import_parser/.pytest_cache/
+
+# Model weights and local caches
+*.onnx
+*.pt
+*.pth
+*.safetensors
+*.bin
+*.gguf
+hf_cache/
+ollama/
+
+# Generated OCR/parser outputs
+*_ocr_output/
+*.tmp.json
