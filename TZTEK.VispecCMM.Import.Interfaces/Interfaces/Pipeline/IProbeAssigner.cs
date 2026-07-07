@@ -5,8 +5,7 @@ namespace TZTEK.VispecCMM.Import.Interfaces.Interfaces.Pipeline;
 /// </summary>
 public interface IProbeAssigner
 {
-    /// <summary>为基元列表分配探针</summary>
-    IReadOnlyList<IProbe> Assign(
-        IReadOnlyList<IPrimitive> primitives,
-        IReadOnlyList<IProbe> availableProbes);
+    IProbe AssignProbe(IPrimitive primitive, IReadOnlyList<IProbe> availableProbes);
+    IReadOnlyList<IProbe> AssignProbesBatch(
+        IReadOnlyList<IPrimitive> primitives, IReadOnlyList<IProbe> availableProbes);
 }

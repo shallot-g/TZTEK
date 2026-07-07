@@ -5,54 +5,35 @@ namespace TZTEK.VispecCMM.Import.Interfaces.Interfaces;
 /// </summary>
 public interface ITolerance : IMeasurableElement
 {
-    /// <summary>公差类型</summary>
-    Models.ToleranceType ToleranceType { get; }
-
-    /// <summary>公差值</summary>
-    double Value { get; }
-
-    /// <summary>关联基元</summary>
-    IPrimitive? TargetPrimitive { get; }
+    ToleranceType ToleranceType { get; }       // 尺寸/几何
+    string SourceElementId { get; }            // 源标注 ID，用于关联
+    double ToleranceValue { get; }             // 公差值
+    ToleranceStandard ToleranceStandard { get; } // ASME / ISO
 }
 
-/// <summary>尺寸公差</summary>
+// ── 尺寸公差 ──
 public interface IDimensionalTolerance : ITolerance
 {
-    /// <summary>尺寸公差子类型</summary>
-    Models.DimensionalToleranceKind Kind { get; }
-
-    /// <summary>名义值</summary>
-    double NominalValue { get; }
-
-    /// <summary>上偏差</summary>
-    double UpperDeviation { get; }
-
-    /// <summary>下偏差</summary>
-    double LowerDeviation { get; }
+    double NominalValue { get; }              // 名义值
+    double UpperDeviation { get; }            // 上偏差
+    double LowerDeviation { get; }            // 下偏差
+    DimensionType DimensionType { get; }      // 线性/直径/半径/角度
+    double UpperLimit { get; }                // 名义值+上偏差
+    double LowerLimit { get; }                // 名义值+下偏差
 }
 
-/// <summary>几何公差</summary>
+// ── 几何公差 (GD&T) ──
 public interface IGeometricTolerance : ITolerance
 {
-    /// <summary>几何公差子类型</summary>
-    Models.GeometricToleranceKind Kind { get; }
-
-    /// <summary>基准参考列表</summary>
-    IReadOnlyList<IDatumReference> DatumReferences { get; }
+    GdntCharacteristic Characteristic { get; }          // 14 种 GD&T 符号
+    ToleranceZoneShape ZoneShape { get; }               // 公差带形状
+    MaterialCondition MaterialCondition { get; }        // RFS/MMC/LMC
+    IReadOnlyList<IDatumReference> Datums { get; }     // 基准参考列表
 }
 
-/// <summary>基准参考</summary>
+// ── 基准参考 ──
 public interface IDatumReference
 {
-    /// <summary>基准标识</summary>
-    string DatumId { get; }
-
-    /// <summary>基准标签（如 A、B、C）</summary>
-    string Label { get; }
-
-    /// <summary>基准修饰符</summary>
-    string? Modifier { get; }
-
-    /// <summary>关联基元</summary>
-    IPrimitive? DatumPrimitive { get; }
+    string Label { get; }                               // "A", "B", "C"
+    MaterialCondition MaterialCondition { get; }
 }
