@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>TZTEK.VispecCMM.Import.Interfaces</RootNamespace>
+    <AssemblyName>TZTEK.VispecCMM.Import.Interfaces</AssemblyName>
+    <Description>Vispec CMM 导入接口定义与数据模型</Description>
+  </PropertyGroup>
+
+</Project>
