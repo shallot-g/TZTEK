@@ -7,10 +7,7 @@ namespace TZTEK.VispecCMM.Import.Interfaces.Interfaces.Pipeline;
 /// </summary>
 public interface IFileImportPipeline
 {
-    /// <summary>执行导入管道</summary>
-    Task<ImportResult> ExecuteAsync(
-        string filePath,
-        ImportOptions options,
-        IProgress<ImportProgress>? progress = null,
-        CancellationToken cancellationToken = default);
+    IReadOnlyList<string> SupportedExtensions { get; }
+    bool CanImport(string filePath);
+    Task<ImportResult> ImportAsync(string filePath, ImportOptions options, CancellationToken ct = default);
 }

@@ -7,14 +7,20 @@ namespace TZTEK.VispecCMM.Import.Interfaces.Interfaces.Pipeline;
 /// </summary>
 public interface IMeasurementTaskAssembler
 {
-    /// <summary>将规划数据组装为完整测量任务</summary>
-    MeasurementTask Assemble(
-        IPrimitive primitive,
-        ITolerance? tolerance,
-        IProbe probe,
-        IReadOnlyList<MeasurementPoint> points);
+    // ── 命名规则 ──
+    NamingRule CurrentRule { get; }
+    void SetRule(NamingRule rule);
+    string GeneratePrimitiveName(IPrimitive primitive, ISet<string>? existingNames = null);
+    string GenerateToleranceName(ITolerance tolerance, string primitiveName, ISet<string>? existingNames = null);
+    IReadOnlyDictionary<IPrimitive, string> GeneratePrimitiveNamesBatch(IReadOnlyList<IPrimitive> primitives);
+    void ResetCounters();
 
-    /// <summary>批量组装测量任务</summary>
-    IReadOnlyList<MeasurementTask> AssembleBatch(
-        IReadOnlyList<(IPrimitive Primitive, ITolerance? Tolerance, IProbe Probe, IReadOnlyList<MeasurementPoint> Points)> inputs);
+    // ── 任务组装 ──
+    Task<MeasurementTask> GenerateAsync(
+        ImportResult importResult,
+        IReadOnlyList<IPrimitive> optimizedPath,
+        NamingRule? namingRule = null,
+        ToleranceStandard toleranceStandard = ToleranceStandard.ASME,
+        IProgress<ImportProgress>? progress = null,
+        CancellationToken cancellationToken = default);
 }

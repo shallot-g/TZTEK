@@ -3,26 +3,13 @@ namespace TZTEK.VispecCMM.Import.Interfaces.Interfaces;
 /// <summary>
 /// 探针接口（配置与分配合并）。
 /// </summary>
-public interface IProbe
+public interface IProbe : IMeasurableElement
 {
-    /// <summary>探针标识</summary>
-    string Id { get; }
-
-    /// <summary>探针名称</summary>
-    string Name { get; }
-
-    /// <summary>探针类型</summary>
-    Models.ProbeType ProbeType { get; }
-
-    /// <summary>测头直径（mm）</summary>
-    double TipDiameter { get; }
-
-    /// <summary>测头长度（mm）</summary>
-    double TipLength { get; }
-
-    /// <summary>分配状态</summary>
-    Models.ProbeAssignStatus AssignStatus { get; }
-
-    /// <summary>已分配的基元列表</summary>
-    IReadOnlyList<IPrimitive> AssignedPrimitives { get; }
+    ProbeType ProbeType { get; }                        // 触发式/扫描式/光学/激光
+    double? BallDiameterMm { get; }                     // 测球直径 (mm)
+    double? StemLengthMm { get; }                       // 探针杆长度 (mm)
+    double AngleADeg { get; }                           // A 轴角度 (度)
+    double AngleBDeg { get; }                           // B 轴角度 (度)
+    IPrimitive? AssignedPrimitive { get; }              // 分配的基元
+    IReadOnlyList<IProbe>? Recommendations { get; }    // 备选推荐
 }
