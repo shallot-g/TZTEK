@@ -17,6 +17,11 @@ public sealed class SafetyPlane : ISafetyPlane
     public double NormalY { get; set; }
     public double NormalZ { get; set; }
     public double OffsetMm { get; set; } = 5.0;
+    public double Offset
+    {
+        get => OffsetMm;
+        set => OffsetMm = value;
+    }
 
     public (double X, double Y, double Z) Point => (PointX, PointY, PointZ);
     public (double X, double Y, double Z) Normal => Normalize(NormalX, NormalY, NormalZ);

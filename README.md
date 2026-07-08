@@ -3,11 +3,12 @@
 本项目用于三坐标测量任务自动生成的第一阶段导入能力：
 
 ```text
-DXF/PDF/STP 文件
+DXF/STP 文件
 → RawDocument / RawElement
 → Primitive / Tolerance
 → PrimitiveToleranceItem
 → ImportResult
+→ MeasurementTask / MeasurementStep / MeasurementPoint
 ```
 
 当前对外入口仍然是 `IPrimitiveToleranceService`。导入解析内部通过 `IFileImportPipeline`
@@ -15,13 +16,12 @@ DXF/PDF/STP 文件
 
 ## 当前支持范围
 
-第一版只声明支持：
+当前运行时只声明支持：
 
 - `.dxf`：通过 Python sidecar 和 `ezdxf` 提取 2D 几何与标注候选。
-- `.pdf`：调用本地 DeepSeek-OCR 提取 OCR 文本，再调用 Ollama 上的 DeepSeek-R1 结构化。
-- `.stp` / `.step`：预留 3D 解析入口，当前支持旁路 JSON 映射，后续接 FreeCAD/OpenCascade/pythonocc。
+- `.stp` / `.step`：通过 CadQuery/OCP 读取 STEP 模型，提取平面、圆柱、圆锥、球面和复杂曲面候选。
 
-`.dwg`、`.iges`、`.stl`、`.obj`、`MSOP` 暂未实现，只保留后续扩展方向。
+`.pdf`、`.dwg`、`.iges`、`.stl`、`.obj`、`MSOP` 暂未作为运行时支持格式，只保留后续扩展方向。
 
 ## 本地依赖
 
@@ -31,7 +31,15 @@ DXF 解析依赖：
 pip install -r tools/import_parser/requirements.txt
 ```
 
-PDF 解析依赖你本机已经部署好的：
+STP/STEP 解析依赖 CadQuery，建议使用项目内专用环境：
+
+```powershell
+py -3.13 -m venv .venv-step
+.\.venv-step\Scripts\python.exe -m pip install -r tools/import_parser/requirements-step.txt
+$env:TZTEK_PARSER_PYTHON="D:\summer_stage\project\TZTEK\.venv-step\Scripts\python.exe"
+```
+
+PDF/OCR 扩展代码已保留，但当前默认不注册为可用输入格式。未来打开 PDF 支持时需要你本机部署好：
 
 - DeepSeek-OCR
 - Ollama
@@ -68,10 +76,39 @@ WSL/Conda 用户建议用本机自己的启动脚本进入 OCR 环境，并把�
 
 ```bash
 python tools/import_parser/parse_file.py --format dxf --input sample.dxf
-python tools/import_parser/parse_file.py --format pdf --input sample.pdf
-python tools/import_parser/parse_file.py --format step --input sample.stp
-python tools/import_parser/deepseek_ocr_runner.py --input sample.pdf --output tools/import_parser/output
+.\.venv-step\Scripts\python.exe tools/import_parser/parse_file.py --format step --input sample.stp
 ```
+
+STP 第一版面向三坐标测量候选基元提取，输出平面、圆柱、圆锥、球面和自由曲面候选；不解析完整 PMI/GD&T 公差。
+
+## 测量计划数据输出
+
+导入完成后，可以通过 `IPrimitiveToleranceService.GenerateMeasurementTasks()` 生成路径规划可用的数据：
+
+```text
+PrimitiveToleranceItem
+→ 可测特征过滤/初步分组
+→ 元素命名
+→ 拟合方法
+→ 测点坐标和法向
+→ 探针、逼近/回退/搜索距离
+→ MeasurementTask
+```
+
+当前默认规则：
+
+- 平面：默认 5 个测点。
+- 圆/圆弧：默认 8 个圆周测点。
+- 圆柱：默认 2 层，每层 8 个测点。
+- 圆锥：默认圆周测点。
+- 球面：默认 6 个测点。
+- 自由曲面：第一版只输出代表测点。
+- 默认距离：逼近 5 mm，回退 5 mm，搜索 2 mm，安全余量 10 mm。
+- 默认命名：`PL1`、`CY1`、`CN1`、`SP1`、`C1`、`LN1`。
+
+这一步只生成路径规划输入数据，不承诺已经完成 TSP/RRT 最短路径和真实碰撞避障。
+
+可调整参数在 `MeasurementPlanOptions` 中，包括测点数量、最小平面面积、最小圆柱半径、默认安全距离、是否启用同特征分组等。
 
 ## 协作规则
 

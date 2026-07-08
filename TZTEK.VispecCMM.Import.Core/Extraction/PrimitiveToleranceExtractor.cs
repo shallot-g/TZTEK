@@ -156,7 +156,8 @@ public sealed class PrimitiveToleranceExtractor : IPrimitiveToleranceExtractor
                 Type = "Plane",
                 SourceElementId = element.Id,
                 Point = ReadPoint(geometry, "point"),
-                Normal = ReadPoint(geometry, "normal") ?? [0, 0, 1]
+                Normal = ReadPoint(geometry, "normal") ?? [0, 0, 1],
+                Area = ReadDouble(geometry, "area")
             },
             "CYLINDER" => new StructuredPrimitiveDto
             {
@@ -165,7 +166,8 @@ public sealed class PrimitiveToleranceExtractor : IPrimitiveToleranceExtractor
                 SourceElementId = element.Id,
                 AxisPoint = ReadPoint(geometry, "axisPoint"),
                 AxisDirection = ReadPoint(geometry, "axisDirection") ?? ReadPoint(geometry, "axisDir"),
-                Radius = ReadDouble(geometry, "radius")
+                Radius = ReadDouble(geometry, "radius"),
+                Area = ReadDouble(geometry, "area")
             },
             "SPHERE" => new StructuredPrimitiveDto
             {
@@ -234,7 +236,7 @@ public sealed class PrimitiveToleranceExtractor : IPrimitiveToleranceExtractor
         var sourceElementId = string.IsNullOrWhiteSpace(dto.SourceElementId) ? id : dto.SourceElementId;
         var name = dto.Name ?? id;
 
-        return primitiveType switch
+        Primitive? primitive = primitiveType switch
         {
             PrimitiveType.Point => CreatePoint(dto, id, sourceElementId, name),
             PrimitiveType.Line => CreateLine(dto, id, sourceElementId, name),
@@ -248,6 +250,11 @@ public sealed class PrimitiveToleranceExtractor : IPrimitiveToleranceExtractor
             PrimitiveType.Surface3D => CreateSurface3D(dto, id, sourceElementId, name),
             _ => null
         };
+
+        if (primitive is not null)
+            primitive.SourceAreaMm2 = dto.Area;
+
+        return primitive;
     }
 
     private static Tolerance? CreateTolerance(StructuredToleranceDto dto)

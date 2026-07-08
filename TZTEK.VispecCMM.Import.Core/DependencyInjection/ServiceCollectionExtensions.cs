@@ -3,6 +3,7 @@ using TZTEK.VispecCMM.Import.Core.External;
 using TZTEK.VispecCMM.Import.Core.Extraction;
 using TZTEK.VispecCMM.Import.Core.Importers;
 using TZTEK.VispecCMM.Import.Core.Pipeline;
+using TZTEK.VispecCMM.Import.Core.Planning;
 using TZTEK.VispecCMM.Import.Core.Services;
 
 namespace TZTEK.VispecCMM.Import.Core.DependencyInjection;
@@ -22,14 +23,16 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ILocalLlmClient, LocalLlmClient>();
 
         services.AddSingleton<IFileFormatImporter, DxfImporter>();
-        services.AddSingleton<IFileFormatImporter, PdfImporter>();
         services.AddSingleton<IFileFormatImporter, StepImporter>();
         services.AddSingleton<IPrimitiveToleranceExtractor, PrimitiveToleranceExtractor>();
 
         services.AddSingleton<IFileImportPipeline, FileImportPipeline>();
-        services.AddSingleton<IProbeAssigner, ProbeAssigner>();
-        services.AddSingleton<IMeasurementPlanner, MeasurementPlanner>();
-        services.AddSingleton<IMeasurementTaskAssembler, MeasurementTaskAssembler>();
+        services.AddSingleton<IMeasurementPresetProvider, DefaultMeasurementPresetProvider>();
+        services.AddSingleton<IFeatureRecognizer, DefaultFeatureRecognizer>();
+        services.AddSingleton<IMeasurementPointPlanner, DefaultMeasurementPointPlanner>();
+        services.AddSingleton<IProbeAssigner, DefaultProbeAssigner>();
+        services.AddSingleton<IMeasurementTaskAssembler, DefaultMeasurementTaskAssembler>();
+        services.AddSingleton<IMeasurementPlanner, DefaultMeasurementPlanner>();
         services.AddSingleton<IPrimitiveToleranceService, PrimitiveToleranceService>();
 
         return services;

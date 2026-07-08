@@ -13,7 +13,13 @@ public abstract class Tolerance : ITolerance
     public abstract ToleranceType ToleranceType { get; }
     public string SourceElementId { get; set; } = string.Empty;
     public virtual double ToleranceValue { get; set; }
+    public double Value
+    {
+        get => ToleranceValue;
+        set => ToleranceValue = value;
+    }
     public ToleranceStandard ToleranceStandard { get; set; } = ToleranceStandard.ASME;
+    public IPrimitive? TargetPrimitive { get; set; }
 
     public (double X, double Y, double Z) GetPosition() => (0, 0, 0);
     public (double I, double J, double K) GetDirection() => (0, 0, 1);
@@ -24,6 +30,7 @@ public abstract class Tolerance : ITolerance
 public sealed class DimensionalTolerance : Tolerance, IDimensionalTolerance
 {
     public override ToleranceType ToleranceType => ToleranceType.Dimensional;
+    public DimensionalToleranceKind Kind { get; set; }
     public double NominalValue { get; set; }
     public double UpperDeviation { get; set; }
     public double LowerDeviation { get; set; }
@@ -36,15 +43,20 @@ public sealed class DimensionalTolerance : Tolerance, IDimensionalTolerance
 public sealed class GeometricTolerance : Tolerance, IGeometricTolerance
 {
     public override ToleranceType ToleranceType => ToleranceType.Geometric;
+    public GeometricToleranceKind Kind { get; set; }
     public GdntCharacteristic Characteristic { get; set; }
     public ToleranceZoneShape ZoneShape { get; set; }
     public MaterialCondition MaterialCondition { get; set; }
     public IReadOnlyList<IDatumReference> Datums { get; set; } = [];
+    public IReadOnlyList<IDatumReference> DatumReferences => Datums;
 }
 
 /// <summary>基准参考</summary>
 public sealed class DatumReference : IDatumReference
 {
+    public string DatumId { get; set; } = string.Empty;
     public string Label { get; set; } = string.Empty;
+    public string? Modifier { get; set; }
+    public IPrimitive? DatumPrimitive { get; set; }
     public MaterialCondition MaterialCondition { get; set; }
 }

@@ -5,8 +5,8 @@ This folder contains the Python sidecar used by the C# import pipeline.
 Current scope:
 
 - DXF: parses `LINE`, `CIRCLE`, `ARC`, `POINT`, `TEXT`, `MTEXT`, and `DIMENSION` with `ezdxf`.
-- PDF: delegates to `deepseek_ocr_runner.py`, which wraps the local DeepSeek-OCR HF model with a stable CLI.
-- STEP/STP: keeps the parser entry point and supports a temporary sidecar JSON file next to the model.
+- STEP/STP: parses CAD faces with CadQuery/OCP and emits CMM-oriented candidate primitives.
+- PDF: extension code is retained but not registered by default in the C# runtime.
 
 Install DXF dependency:
 
@@ -14,15 +14,30 @@ Install DXF dependency:
 pip install -r tools/import_parser/requirements.txt
 ```
 
+Install STEP dependency:
+
+```bash
+pip install -r tools/import_parser/requirements-step.txt
+```
+
 Run manually:
 
 ```bash
 python tools/import_parser/parse_file.py --format dxf --input sample.dxf
-python tools/import_parser/parse_file.py --format pdf --input sample.pdf
 python tools/import_parser/parse_file.py --format step --input sample.stp
 ```
 
-Run OCR directly:
+STEP output is intentionally CMM-oriented. It extracts candidate measurable features:
+
+- `PLANE` faces as `Plane`
+- `CYLINDER` faces as `Cylinder`
+- `CONE` faces as `Cone`
+- `SPHERE` faces as `Sphere`
+- complex surfaces as `Surface3D`
+
+PMI/GD&T extraction is not implemented in the first STEP parser version.
+
+Future PDF/OCR extension test:
 
 ```bash
 python tools/import_parser/deepseek_ocr_runner.py --input sample.pdf --output tools/import_parser/output

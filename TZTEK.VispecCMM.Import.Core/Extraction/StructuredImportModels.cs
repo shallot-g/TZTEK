@@ -26,6 +26,7 @@ internal sealed class StructuredPrimitiveDto
     public double[]? AxisDirection { get; set; }
     public double[]? Apex { get; set; }
     public double? Radius { get; set; }
+    public double? Area { get; set; }
     public double? StartAngleRad { get; set; }
     public double? EndAngleRad { get; set; }
     public double? HalfAngleRad { get; set; }

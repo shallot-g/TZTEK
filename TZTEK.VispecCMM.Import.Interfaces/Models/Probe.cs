@@ -13,11 +13,20 @@ public sealed class Probe : IProbe
     public ProbeType ProbeType { get; set; }
     public double? BallDiameterMm { get; set; }
     public double? StemLengthMm { get; set; }
+    public double TipDiameter { get; set; }
+    public double TipLength { get; set; }
     public double AngleADeg { get; set; }
     public double AngleBDeg { get; set; }
     public IPrimitive? AssignedPrimitive { get; set; }
+    public IReadOnlyList<IPrimitive> AssignedPrimitives { get; set; } = [];
     public IReadOnlyList<IProbe>? Recommendations { get; set; }
     public bool IsAssigned => AssignedPrimitive is not null;
+    public ProbeAssignStatus AssignStatus =>
+        AssignedPrimitive is not null || AssignedPrimitives.Count > 0
+            ? ProbeAssignStatus.Assigned
+            : Recommendations is { Count: > 0 }
+                ? ProbeAssignStatus.Recommended
+                : ProbeAssignStatus.Unassigned;
 
     public (double X, double Y, double Z) GetPosition() => (0, 0, 0);
 

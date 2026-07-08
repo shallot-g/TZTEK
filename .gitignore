@@ -9,6 +9,7 @@ obj/
 *.suo
 
 # Python sidecar local state
+.venv-step/
 tools/import_parser/.venv/
 tools/import_parser/__pycache__/
 tools/import_parser/output/

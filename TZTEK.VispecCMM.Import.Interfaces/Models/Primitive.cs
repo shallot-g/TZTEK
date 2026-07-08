@@ -14,6 +14,7 @@ public abstract class Primitive : IPrimitive
     public string SourceElementId { get; set; } = string.Empty;
     public string? CoordSystemId { get; set; }
     public string? AssignedProbeId { get; set; }
+    public double? SourceAreaMm2 { get; set; }
 
     public (double X, double Y, double Z) GetPosition() => GetRepresentativePoint();
 

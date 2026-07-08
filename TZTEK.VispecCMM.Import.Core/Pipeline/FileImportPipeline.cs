@@ -34,6 +34,15 @@ public sealed class FileImportPipeline : IFileImportPipeline
     }
 
     /// <inheritdoc />
+    public Task<ImportResult> ExecuteAsync(
+        string filePath,
+        ImportOptions options,
+        IProgress<ImportProgress>? progress = null,
+        CancellationToken cancellationToken = default)
+    {
+        return ImportAsync(filePath, options, cancellationToken);
+    }
+
     public async Task<ImportResult> ImportAsync(
         string filePath,
         ImportOptions options,

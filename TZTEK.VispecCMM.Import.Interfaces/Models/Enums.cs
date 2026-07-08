@@ -41,6 +41,34 @@ public enum DimensionType
     Angle
 }
 
+/// <summary>尺寸公差子类型</summary>
+public enum DimensionalToleranceKind
+{
+    Linear,
+    Diameter,
+    Radius,
+    Angle
+}
+
+/// <summary>几何公差子类型</summary>
+public enum GeometricToleranceKind
+{
+    Straightness,
+    Flatness,
+    Circularity,
+    Cylindricity,
+    ProfileOfLine,
+    ProfileOfSurface,
+    Parallelism,
+    Perpendicularity,
+    Angularity,
+    Position,
+    Concentricity,
+    Symmetry,
+    CircularRunout,
+    TotalRunout
+}
+
 /// <summary>GD&amp;T 特征符号（14 种）</summary>
 public enum GdntCharacteristic
 {
@@ -149,6 +177,14 @@ public enum ProbeType
     Scanning,
     Optical,
     Laser
+}
+
+/// <summary>探针分配状态</summary>
+public enum ProbeAssignStatus
+{
+    Unassigned,
+    Assigned,
+    Recommended
 }
 
 /// <summary>坐标系类型</summary>

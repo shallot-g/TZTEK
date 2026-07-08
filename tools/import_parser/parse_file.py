@@ -129,10 +129,217 @@ def parse_step(path: Path) -> dict[str, Any]:
             data["sourceType"] = "Model3D"
         return data
 
-    raise RuntimeError(
-        "STEP parsing is reserved for FreeCAD/OpenCascade/pythonocc integration. "
-        f"For now, provide a sidecar JSON next to the model: {sidecar_json.name}"
-    )
+    try:
+        import cadquery as cq  # type: ignore
+        from OCP.BRepAdaptor import BRepAdaptor_Surface  # type: ignore
+    except ModuleNotFoundError as exc:
+        raise RuntimeError(
+            "STEP parsing requires CadQuery. Install with: "
+            "pip install -r tools/import_parser/requirements-step.txt"
+        ) from exc
+
+    workplane = cq.importers.importStep(str(path))
+    shape = workplane.val()
+    solids = list(shape.Solids()) if hasattr(shape, "Solids") else []
+    face_sources = solids if solids else [shape]
+
+    raw_elements: list[dict[str, Any]] = []
+    primitives: list[dict[str, Any]] = []
+    global_face_index = 0
+
+    for solid_index, source in enumerate(face_sources):
+        for face in source.Faces():
+            face_index = global_face_index
+            global_face_index += 1
+
+            element_id = f"step_face_{face_index:04d}"
+            surface_type = safe_face_geom_type(face)
+            center = cq_vector_to_list(face.Center())
+            area = safe_float(lambda: face.Area(), 0.0)
+            geometry = step_face_geometry(face, surface_type, center, area, BRepAdaptor_Surface)
+
+            annotations = {
+                "source": "STEP",
+                "surfaceType": surface_type,
+                "solidIndex": str(solid_index),
+                "faceIndex": str(face_index),
+                "candidateRole": candidate_role(surface_type),
+            }
+
+            raw_elements.append(
+                {
+                    "id": element_id,
+                    "elementType": surface_type,
+                    "geometry": geometry,
+                    "annotations": annotations,
+                    "area": area,
+                    "solidIndex": solid_index,
+                    "faceIndex": face_index,
+                }
+            )
+
+            primitive = primitive_from_step_face(element_id, surface_type, geometry)
+            if primitive:
+                primitives.append(primitive)
+
+    return {
+        "sourceType": "Model3D",
+        "rawElements": raw_elements,
+        "structuredItems": {
+            "primitives": primitives,
+            "tolerances": [],
+            "links": [],
+            "datums": [],
+            "coordinateSystems": [],
+            "uncertainItems": [],
+        },
+    }
+
+
+def safe_face_geom_type(face: Any) -> str:
+    try:
+        return str(face.geomType()).upper()
+    except Exception:
+        return "UNKNOWN"
+
+
+def step_face_geometry(face: Any, surface_type: str, center: list[float], area: float, adaptor_type: Any) -> dict[str, Any]:
+    geometry: dict[str, Any] = {
+        "surfaceType": surface_type,
+        "center": center,
+        "area": area,
+    }
+
+    if surface_type == "PLANE":
+        geometry["point"] = center
+        geometry["normal"] = cq_vector_to_list(face.normalAt())
+        return geometry
+
+    adaptor = adaptor_type(face.wrapped, True)
+
+    if surface_type == "CYLINDER":
+        cylinder = adaptor.Cylinder()
+        axis = cylinder.Axis()
+        geometry["axisPoint"] = ocp_point_to_list(axis.Location())
+        geometry["axisDirection"] = ocp_direction_to_list(axis.Direction())
+        geometry["radius"] = float(cylinder.Radius())
+        return geometry
+
+    if surface_type == "CONE":
+        cone = adaptor.Cone()
+        axis = cone.Axis()
+        geometry["apex"] = ocp_point_to_list(cone.Apex())
+        geometry["axisPoint"] = ocp_point_to_list(axis.Location())
+        geometry["axisDirection"] = ocp_direction_to_list(axis.Direction())
+        geometry["halfAngleRad"] = float(cone.SemiAngle())
+        geometry["refRadius"] = float(cone.RefRadius())
+        return geometry
+
+    if surface_type == "SPHERE":
+        sphere = adaptor.Sphere()
+        geometry["center"] = ocp_point_to_list(sphere.Location())
+        geometry["radius"] = float(sphere.Radius())
+        return geometry
+
+    return geometry
+
+
+def primitive_from_step_face(element_id: str, surface_type: str, geometry: dict[str, Any]) -> dict[str, Any] | None:
+    if surface_type == "PLANE":
+        return {
+            "id": element_id,
+            "type": "Plane",
+            "sourceElementId": element_id,
+            "point": geometry.get("point"),
+            "normal": geometry.get("normal", [0.0, 0.0, 1.0]),
+            "area": geometry.get("area"),
+        }
+
+    if surface_type == "CYLINDER":
+        return {
+            "id": element_id,
+            "type": "Cylinder",
+            "sourceElementId": element_id,
+            "axisPoint": geometry.get("axisPoint"),
+            "axisDirection": geometry.get("axisDirection"),
+            "radius": geometry.get("radius"),
+            "area": geometry.get("area"),
+        }
+
+    if surface_type == "CONE":
+        return {
+            "id": element_id,
+            "type": "Cone",
+            "sourceElementId": element_id,
+            "apex": geometry.get("apex") or geometry.get("axisPoint"),
+            "axisDirection": geometry.get("axisDirection"),
+            "halfAngleRad": geometry.get("halfAngleRad"),
+            "area": geometry.get("area"),
+        }
+
+    if surface_type == "SPHERE":
+        return {
+            "id": element_id,
+            "type": "Sphere",
+            "sourceElementId": element_id,
+            "center": geometry.get("center"),
+            "radius": geometry.get("radius"),
+            "area": geometry.get("area"),
+        }
+
+    if surface_type in {"BSPLINE", "BEZIER", "OFFSET", "OTHER", "UNKNOWN"}:
+        center = geometry.get("center", [0.0, 0.0, 0.0])
+        return {
+            "id": element_id,
+            "type": "Surface3D",
+            "sourceElementId": element_id,
+            "surfaceType": surface_type,
+            "vertices": [center],
+            "triangles": [],
+            "area": geometry.get("area"),
+        }
+
+    return {
+        "id": element_id,
+        "type": "Surface3D",
+        "sourceElementId": element_id,
+        "surfaceType": surface_type,
+        "vertices": [geometry.get("center", [0.0, 0.0, 0.0])],
+        "triangles": [],
+        "area": geometry.get("area"),
+    }
+
+
+def candidate_role(surface_type: str) -> str:
+    return {
+        "PLANE": "CandidateDatumOrPlane",
+        "CYLINDER": "CandidateHoleOrCylinder",
+        "CONE": "CandidateCone",
+        "SPHERE": "CandidateSphere",
+        "BSPLINE": "CandidateFreeformSurface",
+    }.get(surface_type, "CandidateSurface")
+
+
+def safe_float(factory: Any, fallback: float) -> float:
+    try:
+        return float(factory())
+    except Exception:
+        return fallback
+
+
+def cq_vector_to_list(value: Any) -> list[float]:
+    if hasattr(value, "toTuple"):
+        values = value.toTuple()
+        return [float(values[0]), float(values[1]), float(values[2])]
+    return point3(value)
+
+
+def ocp_point_to_list(point: Any) -> list[float]:
+    return [float(point.X()), float(point.Y()), float(point.Z())]
+
+
+def ocp_direction_to_list(direction: Any) -> list[float]:
+    return [float(direction.X()), float(direction.Y()), float(direction.Z())]
 
 
 def geometry_from_dxf_entity(entity: Any) -> dict[str, Any]:
