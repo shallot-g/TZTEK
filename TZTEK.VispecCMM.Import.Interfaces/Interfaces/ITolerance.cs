@@ -8,8 +8,17 @@ public interface ITolerance : IMeasurableElement
     /// <summary>公差类型</summary>
     Models.ToleranceType ToleranceType { get; }
 
+    /// <summary>源标注 ID，用于和基元关联</summary>
+    string SourceElementId { get; }
+
+    /// <summary>公差值</summary>
+    double ToleranceValue { get; }
+
     /// <summary>公差值</summary>
     double Value { get; }
+
+    /// <summary>公差评定标准</summary>
+    Models.ToleranceStandard ToleranceStandard { get; }
 
     /// <summary>关联基元</summary>
     IPrimitive? TargetPrimitive { get; }
@@ -29,6 +38,9 @@ public interface IDimensionalTolerance : ITolerance
 
     /// <summary>下偏差</summary>
     double LowerDeviation { get; }
+
+    /// <summary>尺寸类型</summary>
+    Models.DimensionType DimensionType { get; }
 }
 
 /// <summary>几何公差</summary>
@@ -36,6 +48,15 @@ public interface IGeometricTolerance : ITolerance
 {
     /// <summary>几何公差子类型</summary>
     Models.GeometricToleranceKind Kind { get; }
+
+    /// <summary>GD&T 特征符号</summary>
+    Models.GdntCharacteristic Characteristic { get; }
+
+    /// <summary>公差带形状</summary>
+    Models.ToleranceZoneShape ZoneShape { get; }
+
+    /// <summary>材料条件</summary>
+    Models.MaterialCondition MaterialCondition { get; }
 
     /// <summary>基准参考列表</summary>
     IReadOnlyList<IDatumReference> DatumReferences { get; }

@@ -3,14 +3,8 @@ namespace TZTEK.VispecCMM.Import.Interfaces.Interfaces;
 /// <summary>
 /// 坐标系接口。
 /// </summary>
-public interface ICoordinateSystem
+public interface ICoordinateSystem : IMeasurableElement
 {
-    /// <summary>唯一标识</summary>
-    string Id { get; }
-
-    /// <summary>名称</summary>
-    string Name { get; }
-
     /// <summary>坐标系类型</summary>
     Models.CoordinateSystemType SystemType { get; }
 
