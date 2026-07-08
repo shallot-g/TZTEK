@@ -15,13 +15,13 @@ internal sealed class DefaultMeasurementPointPlanner : IMeasurementPointPlanner
         var points = primitive switch
         {
             PointPrimitive point => PlanPoint(point),
-            LinePrimitive line => PlanLine(line),
+            LinePrimitive line => PlanLine(line, options),
             CirclePrimitive circle => PlanCircle(circle, options),
             ArcPrimitive arc => PlanArc(arc, options),
             PlanePrimitive plane => PlanPlane(plane, options),
             CylinderPrimitive cylinder => PlanCylinder(cylinder, options),
             ConePrimitive cone => PlanCone(cone, options),
-            SpherePrimitive sphere => PlanSphere(sphere),
+            SpherePrimitive sphere => PlanSphere(sphere, options),
             Surface3DPrimitive surface => PlanSurface(surface),
             _ => []
         };
@@ -42,21 +42,26 @@ internal sealed class DefaultMeasurementPointPlanner : IMeasurementPointPlanner
         CreatePoint(point.X, point.Y, point.Z, 0, 0, 1)
     ];
 
-    private static List<MeasurementPoint> PlanLine(LinePrimitive line)
+    private static List<MeasurementPoint> PlanLine(LinePrimitive line, MeasurementPlanOptions options)
     {
         var direction = Normalize((line.DirX, line.DirY, line.DirZ));
         var length = Math.Max(10.0, Length((line.DirX, line.DirY, line.DirZ)));
-        return
-        [
-            CreatePoint(line.StartX, line.StartY, line.StartZ, 0, 0, 1),
-            CreatePoint(
-                line.StartX + direction.X * length,
-                line.StartY + direction.Y * length,
-                line.StartZ + direction.Z * length,
+        var count = Math.Max(2, options.LinePointCount);
+        var points = new List<MeasurementPoint>();
+
+        for (var i = 0; i < count; i++)
+        {
+            var fraction = count == 1 ? 0 : (double)i / (count - 1);
+            points.Add(CreatePoint(
+                line.StartX + direction.X * length * fraction,
+                line.StartY + direction.Y * length * fraction,
+                line.StartZ + direction.Z * length * fraction,
                 0,
                 0,
-                1)
-        ];
+                1));
+        }
+
+        return points;
     }
 
     private static List<MeasurementPoint> PlanCircle(CirclePrimitive circle, MeasurementPlanOptions options)
@@ -78,7 +83,7 @@ internal sealed class DefaultMeasurementPointPlanner : IMeasurementPointPlanner
     {
         var normal = Normalize((arc.NormalX, arc.NormalY, arc.NormalZ));
         var (u, v) = BuildBasis(normal);
-        var count = Math.Max(3, Math.Min(options.CirclePointCount, 8));
+        var count = Math.Max(3, options.ArcPointCount);
         return PlanCircularPoints(
             (arc.CenterX, arc.CenterY, arc.CenterZ),
             normal,
@@ -96,33 +101,20 @@ internal sealed class DefaultMeasurementPointPlanner : IMeasurementPointPlanner
         var (u, v) = BuildBasis(normal);
         var spread = Math.Max(1.0, Math.Sqrt(plane.SourceAreaMm2 ?? 100.0) * 0.25);
         var center = (plane.PointX, plane.PointY, plane.PointZ);
-        var count = Math.Max(3, options.PlanePointCount);
+        var uCount = Math.Max(1, options.PlaneGridUCount);
+        var vCount = Math.Max(1, options.PlaneGridVCount);
+        var points = new List<MeasurementPoint>();
 
-        var points = new List<MeasurementPoint>
+        for (var i = 0; i < uCount; i++)
         {
-            CreatePoint(center.PointX, center.PointY, center.PointZ, normal.X, normal.Y, normal.Z)
-        };
-
-        var offsets = new[]
-        {
-            Scale(u, spread),
-            Scale(u, -spread),
-            Scale(v, spread),
-            Scale(v, -spread)
-        };
-
-        foreach (var offset in offsets.Take(count - 1))
-        {
-            var point = Add(center, offset);
-            points.Add(CreatePoint(point.X, point.Y, point.Z, normal.X, normal.Y, normal.Z));
-        }
-
-        while (points.Count < count)
-        {
-            var angle = Math.PI * 2 * points.Count / count;
-            var offset = Add(Scale(u, Math.Cos(angle) * spread), Scale(v, Math.Sin(angle) * spread));
-            var point = Add(center, offset);
-            points.Add(CreatePoint(point.X, point.Y, point.Z, normal.X, normal.Y, normal.Z));
+            var uFraction = uCount == 1 ? 0 : (double)i / (uCount - 1) - 0.5;
+            for (var j = 0; j < vCount; j++)
+            {
+                var vFraction = vCount == 1 ? 0 : (double)j / (vCount - 1) - 0.5;
+                var offset = Add(Scale(u, uFraction * spread * 2), Scale(v, vFraction * spread * 2));
+                var point = Add(center, offset);
+                points.Add(CreatePoint(point.X, point.Y, point.Z, normal.X, normal.Y, normal.Z));
+            }
         }
 
         return points;
@@ -161,34 +153,40 @@ internal sealed class DefaultMeasurementPointPlanner : IMeasurementPointPlanner
     {
         var axis = Normalize((cone.AxisDirX, cone.AxisDirY, cone.AxisDirZ));
         var (u, v) = BuildBasis(axis);
-        var count = Math.Max(3, options.CirclePointCount);
+        var radialCount = Math.Max(3, options.ConeRadialPointCount);
+        var levelCount = Math.Max(1, options.ConeLevelCount);
         var distanceFromApex = 5.0;
-        var radius = Math.Max(0.5, Math.Tan(cone.HalfAngleRad) * distanceFromApex);
-        var center = Add((cone.ApexX, cone.ApexY, cone.ApexZ), Scale(axis, distanceFromApex));
+        var points = new List<MeasurementPoint>();
 
-        return PlanCircularPoints(center, axis, u, v, radius, count, 0, Math.PI * 2);
+        for (var level = 0; level < levelCount; level++)
+        {
+            var levelDistance = distanceFromApex * (level + 1);
+            var radius = Math.Max(0.5, Math.Tan(cone.HalfAngleRad) * levelDistance);
+            var center = Add((cone.ApexX, cone.ApexY, cone.ApexZ), Scale(axis, levelDistance));
+            points.AddRange(PlanCircularPoints(center, axis, u, v, radius, radialCount, 0, Math.PI * 2));
+        }
+
+        return points;
     }
 
-    private static List<MeasurementPoint> PlanSphere(SpherePrimitive sphere)
+    private static List<MeasurementPoint> PlanSphere(SpherePrimitive sphere, MeasurementPlanOptions options)
     {
         var center = (sphere.CenterX, sphere.CenterY, sphere.CenterZ);
-        var directions = new[]
-        {
-            (1.0, 0.0, 0.0),
-            (-1.0, 0.0, 0.0),
-            (0.0, 1.0, 0.0),
-            (0.0, -1.0, 0.0),
-            (0.0, 0.0, 1.0),
-            (0.0, 0.0, -1.0)
-        };
+        var count = Math.Max(6, options.SpherePointCount);
+        var points = new List<MeasurementPoint>();
+        var goldenAngle = Math.PI * (3 - Math.Sqrt(5));
 
-        return directions
-            .Select(direction =>
-            {
-                var point = Add(center, Scale(direction, sphere.Radius));
-                return CreatePoint(point.X, point.Y, point.Z, direction.Item1, direction.Item2, direction.Item3);
-            })
-            .ToList();
+        for (var i = 0; i < count; i++)
+        {
+            var y = 1 - (2.0 * i / (count - 1));
+            var radial = Math.Sqrt(Math.Max(0, 1 - y * y));
+            var theta = goldenAngle * i;
+            var direction = (Math.Cos(theta) * radial, Math.Sin(theta) * radial, y);
+            var point = Add(center, Scale(direction, sphere.Radius));
+            points.Add(CreatePoint(point.X, point.Y, point.Z, direction.Item1, direction.Item2, direction.Item3));
+        }
+
+        return points;
     }
 
     private static List<MeasurementPoint> PlanSurface(Surface3DPrimitive surface)

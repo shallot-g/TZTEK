@@ -24,10 +24,17 @@ public sealed class MeasurementPlanOptions
     public double SafetyClearanceMm { get; set; } = 10.0;
     public double MinPlaneAreaMm2 { get; set; } = 1.0;
     public double MinCylinderRadiusMm { get; set; } = 0.1;
-    public int PlanePointCount { get; set; } = 5;
+    public int LinePointCount { get; set; } = 3;
+    public int PlaneGridUCount { get; set; } = 5;
+    public int PlaneGridVCount { get; set; } = 5;
+    public int PlanePointCount { get; set; } = 25;
     public int CirclePointCount { get; set; } = 8;
+    public int ArcPointCount { get; set; } = 5;
     public int CylinderRadialPointCount { get; set; } = 8;
-    public int CylinderLevelCount { get; set; } = 2;
+    public int CylinderLevelCount { get; set; } = 3;
+    public int ConeRadialPointCount { get; set; } = 8;
+    public int ConeLevelCount { get; set; } = 2;
+    public int SpherePointCount { get; set; } = 15;
     public bool EnableFeatureFiltering { get; set; } = true;
     public bool EnableSameFeatureGrouping { get; set; } = true;
 }
