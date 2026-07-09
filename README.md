@@ -112,6 +112,88 @@ PrimitiveToleranceItem
 
 可调整参数在 `MeasurementPlanOptions` 中，包括测点数量、最小平面面积、最小圆柱半径、默认安全距离、是否启用同特征分组等。
 
+## 安全路径与连续测量
+
+当前已经实现第一版安全平面避障和特征级连续测量，入口仍是：
+
+```csharp
+IPrimitiveToleranceService.GenerateMeasurementTasks(options)
+```
+
+当 `MeasurementPlanOptions.EnableCollisionAvoidance = true` 时，`DefaultMeasurementPlanner`
+会调用 `ISafePathPlanner`，把原始测量步骤展开为包含 `Movement` 和 `Measurement` 的执行步骤。
+
+当前路径策略：
+
+```text
+安全平面
+→ 进入某个测量特征
+→ 连续测完该特征的所有测点
+→ 退出该特征
+→ 回安全平面
+→ 进入下一个测量特征
+```
+
+默认连续测量的基元：
+
+- `Line`
+- `Circle`
+- `Arc`
+- `Plane`
+- `Cylinder`
+- `Cone`
+- `Sphere`
+
+`Surface3D` 目前只生成代表点，仍按保守策略处理。
+
+相关开关：
+
+```csharp
+new MeasurementPlanOptions
+{
+    EnableCollisionAvoidance = true,
+    EnableContinuousFeaturePath = true,
+    EnableContinuousCylinderPath = true,
+    EnableSinglePointSafetyPath = true
+}
+```
+
+含义：
+
+- `EnableCollisionAvoidance`：是否展开安全移动步骤。
+- `EnableContinuousFeaturePath`：平面、圆、圆弧、线、圆锥、球等是否按特征连续测量。
+- `EnableContinuousCylinderPath`：圆柱是否使用连续测量；空心圆柱会用“同轴小半径为内孔候选”的第一版启发式修正接近方向。
+- `EnableSinglePointSafetyPath`：当不适合连续测量时，是否退回“每个测点回安全平面”的保守策略。
+
+已验证的 `圆柱.stp` 测试结果：
+
+```text
+原始 STP 解析：Cylinder 4, Plane 2
+特征识别后：CY1 24点, CY2 24点, PL1 25点, PL2 25点
+
+旧版单点安全路径：
+Movement 392, Measurement 98, TotalPath 43419.592 mm
+
+仅圆柱连续：
+Movement 256, Measurement 98, TotalPath 17329.210 mm
+
+当前默认特征级连续：
+Movement 114, Measurement 98, TotalPath 3902.866 mm
+```
+
+注意：当前仍不是完整真实碰撞检测。现在的 `DefaultSafePathPlanner.AddMovement(...)`
+生成的是直线 `GotoPoint` 移动。后续接入障碍物、夹具、探针半径、工件网格或 RRT/A* 时，建议在这一层替换为：
+
+```text
+起点 / 终点
+→ 碰撞检测
+→ 无碰撞：保留直线移动
+→ 有碰撞：插入绕障 GotoPoint 或采样路径
+```
+
+底面不可测、夹具遮挡、探针是否能进入小孔，目前还没有作为强规则过滤。后续建议在 `IFeatureRecognizer`
+或独立的“可达性分析”服务中处理，再进入测点生成和安全路径规划。
+
 ## 协作规则
 
 可以提交：

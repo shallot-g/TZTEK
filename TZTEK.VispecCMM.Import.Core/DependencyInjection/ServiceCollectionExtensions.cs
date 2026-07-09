@@ -32,6 +32,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IMeasurementPointPlanner, DefaultMeasurementPointPlanner>();
         services.AddSingleton<IProbeAssigner, DefaultProbeAssigner>();
         services.AddSingleton<IMeasurementTaskAssembler, DefaultMeasurementTaskAssembler>();
+        services.AddSingleton<ISafePathPlanner, DefaultSafePathPlanner>();
         services.AddSingleton<IMeasurementPlanner, DefaultMeasurementPlanner>();
         services.AddSingleton<IPrimitiveToleranceService, PrimitiveToleranceService>();
 

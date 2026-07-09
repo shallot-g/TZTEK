@@ -15,6 +15,9 @@ public sealed class MeasurementPlanOptions
     public TimeSpan PathTimeout { get; set; } = TimeSpan.FromSeconds(30);
 
     public bool EnableCollisionAvoidance { get; set; } = true;
+    public bool EnableContinuousFeaturePath { get; set; } = true;
+    public bool EnableContinuousCylinderPath { get; set; } = true;
+    public bool EnableSinglePointSafetyPath { get; set; } = true;
     public ToleranceStandard ToleranceStandard { get; set; } = ToleranceStandard.ASME;
     public NamingRule? NamingRule { get; set; }
 

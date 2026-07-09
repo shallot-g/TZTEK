@@ -6,17 +6,20 @@ internal sealed class DefaultMeasurementPlanner : IMeasurementPlanner
     private readonly IMeasurementPointPlanner _pointPlanner;
     private readonly IProbeAssigner _probeAssigner;
     private readonly IMeasurementPresetProvider _presetProvider;
+    private readonly ISafePathPlanner _safePathPlanner;
 
     public DefaultMeasurementPlanner(
         IFeatureRecognizer featureRecognizer,
         IMeasurementPointPlanner pointPlanner,
         IProbeAssigner probeAssigner,
-        IMeasurementPresetProvider presetProvider)
+        IMeasurementPresetProvider presetProvider,
+        ISafePathPlanner safePathPlanner)
     {
         _featureRecognizer = featureRecognizer;
         _pointPlanner = pointPlanner;
         _probeAssigner = probeAssigner;
         _presetProvider = presetProvider;
+        _safePathPlanner = safePathPlanner;
     }
 
     public IReadOnlyList<MeasurementTask> Plan(
@@ -62,23 +65,22 @@ internal sealed class DefaultMeasurementPlanner : IMeasurementPlanner
         var totalLength = EstimateTaskPathLength(steps, options.StartPoint);
         var preset = _presetProvider.GetPreset(options);
 
-        return
-        [
-            new MeasurementTask
-            {
-                TaskId = $"task_{Guid.NewGuid():N}",
-                Name = "Generated CMM Measurement Task",
-                CreatedAt = DateTime.UtcNow,
-                ToleranceStandard = options.ToleranceStandard,
-                LengthUnit = options.Unit,
-                Steps = steps,
-                ProbeConfigurations = assignedProbes,
-                GlobalSafetyPlane = CreateSafetyPlane(allPoints, preset),
-                PathOptimizationStrategy = options.PathStrategy,
-                TotalPathLengthMm = totalLength,
-                EstimatedTotalTimeSeconds = totalLength / 20.0
-            }
-        ];
+        var task = new MeasurementTask
+        {
+            TaskId = $"task_{Guid.NewGuid():N}",
+            Name = "Generated CMM Measurement Task",
+            CreatedAt = DateTime.UtcNow,
+            ToleranceStandard = options.ToleranceStandard,
+            LengthUnit = options.Unit,
+            Steps = steps,
+            ProbeConfigurations = assignedProbes,
+            GlobalSafetyPlane = CreateSafetyPlane(allPoints, preset),
+            PathOptimizationStrategy = options.PathStrategy,
+            TotalPathLengthMm = totalLength,
+            EstimatedTotalTimeSeconds = totalLength / 20.0
+        };
+
+        return [options.EnableCollisionAvoidance ? _safePathPlanner.ApplySafetyPath(task, options) : task];
     }
 
     private static void ApplyNames(IReadOnlyList<PrimitiveToleranceItem> items, NamingRule namingRule)
