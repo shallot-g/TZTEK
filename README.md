@@ -108,13 +108,13 @@ PrimitiveToleranceItem
 - 默认距离：逼近 5 mm，回退 5 mm，搜索 2 mm，安全余量 10 mm。
 - 默认命名：`PL1`、`CY1`、`CN1`、`SP1`、`C1`、`LN1`。
 
-这一步只生成路径规划输入数据，不承诺已经完成 TSP/RRT 最短路径和真实碰撞避障。
+这一步生成路径规划输入数据，并提供第一版原型级安全移动与碰撞风险标记；不承诺已经完成 TSP/RRT 最短路径和工业级真实碰撞避障。
 
 可调整参数在 `MeasurementPlanOptions` 中，包括测点数量、最小平面面积、最小圆柱半径、默认安全距离、是否启用同特征分组等。
 
 ## 安全路径与连续测量
 
-当前已经实现第一版安全平面避障和特征级连续测量，入口仍是：
+当前已经实现第一版安全移动、GOTO 锚点避障和特征级连续测量，入口仍是：
 
 ```csharp
 IPrimitiveToleranceService.GenerateMeasurementTasks(options)
@@ -133,6 +133,29 @@ IPrimitiveToleranceService.GenerateMeasurementTasks(options)
 → 回安全平面
 → 进入下一个测量特征
 ```
+
+### 新路径规划算法总结
+
+当前路径规划不是直接做完整 TSP/RRT，而是先生成一条适合三坐标原型演示的安全测量路径。整体流程如下：
+
+```text
+MeasurementTask 原始测量特征
+→ 为每个特征生成测点
+→ 为每个特征生成入口/出口 GOTO 锚点
+→ 特征内部连续测量
+→ 特征之间优先直线连接
+→ 直线连接有碰撞风险时，使用自动全局安全 GOTO 绕行
+→ 自动 GOTO 不可用时，使用用户/测量软件预设 GOTO
+→ 仍不可用时，标记 Needs manual GOTO point
+```
+
+核心设计原则：
+
+- **特征内部连续测量**：圆柱、平面、圆、圆弧、线、圆锥、球等基元会尽量在一个特征内连续测完，避免每个测点都回安全平面。
+- **特征之间直连优先**：从一个特征的退出锚点到下一个特征的入口锚点，如果碰撞检测通过，就直接移动，减少无意义绕行。
+- **自动全局安全 GOTO**：如果直连有碰撞风险，系统会把路径抬到工件整体安全高度上方，再水平移动到目标特征上方，最后进入目标特征。
+- **人工 GOTO 只是兜底**：只有自动全局安全 GOTO 和用户预设 GOTO 都无法证明安全时，才标记需要人工设置 GOTO。
+- **当前不是工业级真实碰撞检测**：现在使用 AABB 粗筛加部分基元窄相检查，适合原型演示；夹具、侧孔、横向探针、机床行程仍需要后续增强。
 
 默认连续测量的基元：
 
@@ -157,7 +180,12 @@ new MeasurementPlanOptions
     EnableSinglePointSafetyPath = true,
     EnableCollisionCheck = true,
     CollisionSafetyMarginMm = 2.0,
-    CollisionLiftClearanceMm = 10.0
+    EnableGotoAvoidance = true,
+    EnableDirectTransitionShortcut = true,
+    EnableAutoGlobalSafeGoto = true,
+    AutoSafeGotoExtraClearanceMm = 5.0,
+    EnablePrimitiveNarrowPhaseCollisionCheck = true,
+    RequireUserGotoWhenAnchorTransitionCollides = true
 }
 ```
 
@@ -169,7 +197,13 @@ new MeasurementPlanOptions
 - `EnableSinglePointSafetyPath`：当不适合连续测量时，是否退回“每个测点回安全平面”的保守策略。
 - `EnableCollisionCheck`：是否启用第一版保守碰撞检测。
 - `CollisionSafetyMarginMm`：碰撞体额外膨胀余量。
-- `CollisionLiftClearanceMm`：检测到碰撞后沿当前安全平面法向绕行的距离。
+- `EnableGotoAvoidance`：检测到碰撞时是否尝试插入 GOTO 点。
+- `UserGotoPoints`：用户或测量软件预设的安全 GOTO 点列表。
+- `EnableDirectTransitionShortcut`：特征锚点之间优先尝试无碰撞直线移动。
+- `EnableAutoGlobalSafeGoto`：锚点直连有碰撞时，是否自动尝试全局安全高度 GOTO。
+- `AutoSafeGotoExtraClearanceMm`：自动全局安全 GOTO 在安全高度之上的额外余量。
+- `EnablePrimitiveNarrowPhaseCollisionCheck`：AABB 粗筛命中后，是否继续执行基元级窄相检查以降低误报。
+- `RequireUserGotoWhenAnchorTransitionCollides`：自动 GOTO 和用户 GOTO 都不可用时，是否标记需要人工 GOTO。
 
 已验证的 `圆柱.stp` 测试结果：
 
@@ -186,8 +220,14 @@ Movement 256, Measurement 98, TotalPath 17329.210 mm
 当前默认特征级连续：
 Movement 114, Measurement 98, TotalPath 3902.866 mm
 
-开启第一版碰撞检测：
-Movement 128, Measurement 98, TotalPath 4042.866 mm
+开启第一版碰撞检测 + GOTO 避障：
+无碰撞的特征锚点移动直接保留。
+锚点移动有碰撞时，先尝试自动全局安全 GOTO。
+自动全局安全 GOTO 不可用时，再尝试用户/测量软件预设 GOTO。
+两者都不可用时，保留原路径并标记 Needs manual GOTO point。
+
+当前圆柱回归：
+Movement 118, Measurement 98, AutoGlobalSafeGoto 6, ManualGoto 0, TotalPath 4014.866 mm
 ```
 
 ## 第一版碰撞检测
@@ -210,25 +250,43 @@ MeasurementTask
 → 收集工件基元并生成简化 AABB 碰撞体
 → 按默认探针半径和安全余量膨胀 AABB
 → 检测 Movement 线段是否穿过碰撞体
-→ 如果有碰撞，沿当前 SafetyPlane 法向插入绕行 Movement
+→ 无碰撞：保留当前直线移动
+→ 有碰撞：回到特征入口/出口 GOTO 锚点语义
+→ 优先尝试自动全局安全 GOTO
+→ 自动 GOTO 不可用时尝试用户或测量软件预设 GOTO 点
+→ 仍没有可用 GOTO：保留原路径并标记需要人工 GOTO 点
 ```
 
-绕行方向不是固定向上，而是优先使用当前步骤的局部安全平面方向：
+当前 GOTO 锚点策略：
 
 ```text
-当前点
-→ 当前点 + SafetyPlane.Normal * CollisionLiftClearanceMm
-→ 目标点 + SafetyPlane.Normal * CollisionLiftClearanceMm
-→ 目标点
+1. 特征入口/出口 GOTO：
+   每个测量特征进入前有 EntryGoto，测完退出后有 ExitGoto。
+   特征内部连续测量路径被视为已知测量路径。
+
+2. 直连优先：
+   当前 GOTO → 下一特征 EntryGoto 若无碰撞，直接移动。
+
+3. 自动全局安全 GOTO：
+   若锚点直连有碰撞，自动生成 current → current 上方 safeZ → target 上方 safeZ → target。
+   高空水平段必须通过碰撞检测；若高度不够，会按安全余量逐级抬升。
+
+4. 用户/测量软件预设 GOTO：
+   若锚点直连有碰撞，从 UserGotoPoints 中选择 current → goto → target 两段均无碰撞且总距离最短的点。
+
+5. 人工 GOTO：
+   如果自动 GOTO 和用户 GOTO 都不可用，保留原 Movement，并将 GotoTarget.Reason 标记为 Needs manual GOTO point。
 ```
 
-这样后续如果加入侧向探针姿态，可以为侧面孔配置 `Normal = (1,0,0)` 或 `(0,1,0)` 的局部安全平面，绕行方向会跟随姿态变化，而不是统一向 `+Z` 抬高。
+当前算法不会凭空生成主轴方向的未知 GOTO，也不会使用局部安全平面法向抬高绕行。自动 GOTO 只面向默认竖直探针的全局上方安全移动；对于侧孔、横向探针等复杂情况，推荐由用户或测量软件提前提供侧向安全 GOTO 点；如果系统无法可靠判断，则标记为需要人工设置 GOTO 点。
 
 当前碰撞检测仍是保守近似，不等价于真实 CAD 实体碰撞：
 
 - 使用 AABB 包围盒，可能误报碰撞。
+- AABB 粗筛后会对圆柱、球等基元做第一版窄相检查，降低简单圆柱误报。
 - 默认使用 2 mm 触发式探针近似，不做多探针选择。
-- 特征内部接近/测量/退出段会尽量避免误判正常测量接触。
+- 特征内部接近、测量、退出段按已知测量路径处理，避免把正常接触误报为绕障。
+- 自动全局安全 GOTO 只解决普通上方绕行；锚点直连、自动 GOTO、用户 GOTO 都失败时才要求人工设置。
 - 暂不处理夹具、工作台、机床行程、测头体积、探针杆精确模型。
 
 后续如需升级为更真实的避障，优先替换 `IPathCollisionResolver`：
@@ -237,7 +295,7 @@ MeasurementTask
 直线 Movement
 → 网格/实体碰撞检测
 → 无碰撞：保留直线移动
-→ 有碰撞：生成绕障 GotoPoint、A*、RRT 或其它采样路径
+→ 有碰撞：选择预设 GOTO、多 GOTO 搜索、A*、RRT 或其它采样路径
 ```
 
 底面不可测、夹具遮挡、探针是否能进入小孔，目前还没有作为强规则过滤。后续建议在 `IFeatureRecognizer`

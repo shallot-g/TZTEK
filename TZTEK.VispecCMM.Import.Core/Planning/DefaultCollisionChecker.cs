@@ -11,12 +11,28 @@ internal sealed class DefaultCollisionChecker : ICollisionChecker
         int segmentIndex)
     {
         var boxes = BuildCollisionBoxes(task, movementStep, options).ToList();
+        if (IsAboveGlobalSafeHeight(start, end, boxes, options))
+        {
+            return new CollisionResult
+            {
+                HasCollision = false,
+                TotalSegmentsChecked = 1
+            };
+        }
+
         var collisions = new List<CollisionEvent>();
 
         foreach (var box in boxes)
         {
             if (!IntersectsSegment(box, start, end))
                 continue;
+
+            if (options.EnablePrimitiveNarrowPhaseCollisionCheck
+                && box.Primitive is not null
+                && !IntersectsPrimitive(box.Primitive, start, end, box.Margin))
+            {
+                continue;
+            }
 
             collisions.Add(new CollisionEvent
             {
@@ -26,7 +42,14 @@ internal sealed class DefaultCollisionChecker : ICollisionChecker
                 SegmentIndex = segmentIndex,
                 InvolvedElementIds = [box.ElementId],
                 Severity = 1,
-                SuggestedAvoidancePoint = BuildSuggestedAvoidancePoint(movementStep, start, options)
+                SuggestedAvoidancePoint = new GotoPoint
+                {
+                    Id = $"collision_{segmentIndex}",
+                    X = (start.X + end.X) / 2,
+                    Y = (start.Y + end.Y) / 2,
+                    Z = (start.Z + end.Z) / 2,
+                    Reason = "Collision detected; use feature anchor or user GOTO point"
+                }
             });
         }
 
@@ -60,13 +83,13 @@ internal sealed class DefaultCollisionChecker : ICollisionChecker
         {
             PlanePrimitive plane => BuildPlaneBox(plane, margin),
             CylinderPrimitive cylinder => BuildCylinderBox(cylinder, margin),
-            ConePrimitive cone => BuildPointBox(cone.Id, cone.ApexX, cone.ApexY, cone.ApexZ, 10 + margin),
+            ConePrimitive cone => BuildPointBox(cone, cone.ApexX, cone.ApexY, cone.ApexZ, 10 + margin, margin),
             SpherePrimitive sphere => BuildSphereBox(sphere, margin),
             Surface3DPrimitive surface => BuildSurfaceBox(surface, margin),
-            CirclePrimitive circle => BuildPointBox(circle.Id, circle.CenterX, circle.CenterY, circle.CenterZ, circle.Radius + margin),
-            ArcPrimitive arc => BuildPointBox(arc.Id, arc.CenterX, arc.CenterY, arc.CenterZ, arc.Radius + margin),
+            CirclePrimitive circle => BuildPointBox(circle, circle.CenterX, circle.CenterY, circle.CenterZ, circle.Radius + margin, margin),
+            ArcPrimitive arc => BuildPointBox(arc, arc.CenterX, arc.CenterY, arc.CenterZ, arc.Radius + margin, margin),
             LinePrimitive line => BuildLineBox(line, margin),
-            PointPrimitive point => BuildPointBox(point.Id, point.X, point.Y, point.Z, margin),
+            PointPrimitive point => BuildPointBox(point, point.X, point.Y, point.Z, margin, margin),
             _ => null
         };
     }
@@ -74,7 +97,7 @@ internal sealed class DefaultCollisionChecker : ICollisionChecker
     private static CollisionBox BuildPlaneBox(PlanePrimitive plane, double margin)
     {
         var spread = Math.Max(1.0, Math.Sqrt(plane.SourceAreaMm2 ?? 100.0) * 0.5) + margin;
-        return BuildPointBox(plane.Id, plane.PointX, plane.PointY, plane.PointZ, spread);
+        return BuildPointBox(plane, plane.PointX, plane.PointY, plane.PointZ, spread, margin);
     }
 
     private static CollisionBox BuildCylinderBox(CylinderPrimitive cylinder, double margin)
@@ -88,6 +111,8 @@ internal sealed class DefaultCollisionChecker : ICollisionChecker
 
         return new CollisionBox(
             cylinder.Id,
+            cylinder,
+            margin,
             Math.Min(p0.X, p1.X) - radius,
             Math.Min(p0.Y, p1.Y) - radius,
             Math.Min(p0.Z, p1.Z) - radius,
@@ -98,7 +123,7 @@ internal sealed class DefaultCollisionChecker : ICollisionChecker
 
     private static CollisionBox BuildSphereBox(SpherePrimitive sphere, double margin)
     {
-        return BuildPointBox(sphere.Id, sphere.CenterX, sphere.CenterY, sphere.CenterZ, sphere.Radius + margin);
+        return BuildPointBox(sphere, sphere.CenterX, sphere.CenterY, sphere.CenterZ, sphere.Radius + margin, margin);
     }
 
     private static CollisionBox? BuildSurfaceBox(Surface3DPrimitive surface, double margin)
@@ -108,6 +133,8 @@ internal sealed class DefaultCollisionChecker : ICollisionChecker
 
         return new CollisionBox(
             surface.Id,
+            surface,
+            margin,
             surface.Vertices.Min(vertex => vertex.X) - margin,
             surface.Vertices.Min(vertex => vertex.Y) - margin,
             surface.Vertices.Min(vertex => vertex.Z) - margin,
@@ -121,6 +148,8 @@ internal sealed class DefaultCollisionChecker : ICollisionChecker
         var end = (line.StartX + line.DirX, line.StartY + line.DirY, line.StartZ + line.DirZ);
         return new CollisionBox(
             line.Id,
+            line,
+            margin,
             Math.Min(line.StartX, end.Item1) - margin,
             Math.Min(line.StartY, end.Item2) - margin,
             Math.Min(line.StartZ, end.Item3) - margin,
@@ -129,9 +158,80 @@ internal sealed class DefaultCollisionChecker : ICollisionChecker
             Math.Max(line.StartZ, end.Item3) + margin);
     }
 
-    private static CollisionBox BuildPointBox(string id, double x, double y, double z, double radius)
+    private static CollisionBox BuildPointBox(Primitive primitive, double x, double y, double z, double radius, double margin)
     {
-        return new CollisionBox(id, x - radius, y - radius, z - radius, x + radius, y + radius, z + radius);
+        return new CollisionBox(primitive.Id, primitive, margin, x - radius, y - radius, z - radius, x + radius, y + radius, z + radius);
+    }
+
+    private static bool IsAboveGlobalSafeHeight(
+        (double X, double Y, double Z) start,
+        (double X, double Y, double Z) end,
+        IReadOnlyList<CollisionBox> boxes,
+        MeasurementPlanOptions options)
+    {
+        if (boxes.Count == 0)
+            return false;
+
+        var safeZ = boxes.Max(box => box.MaxZ) + Math.Max(0, options.AutoSafeGotoExtraClearanceMm);
+        return start.Z >= safeZ - 1e-6 && end.Z >= safeZ - 1e-6;
+    }
+
+    private static bool IntersectsPrimitive(
+        Primitive primitive,
+        (double X, double Y, double Z) start,
+        (double X, double Y, double Z) end,
+        double margin)
+    {
+        return primitive switch
+        {
+            CylinderPrimitive cylinder => IntersectsCylinder(cylinder, start, end, margin),
+            SpherePrimitive sphere => IntersectsSphere(sphere, start, end, margin),
+            _ => true
+        };
+    }
+
+    private static bool IntersectsCylinder(
+        CylinderPrimitive cylinder,
+        (double X, double Y, double Z) start,
+        (double X, double Y, double Z) end,
+        double margin)
+    {
+        var axis = Normalize((cylinder.AxisDirX, cylinder.AxisDirY, cylinder.AxisDirZ));
+        var center = (cylinder.AxisPointX, cylinder.AxisPointY, cylinder.AxisPointZ);
+        var radius = cylinder.Radius + margin;
+        var samples = 8;
+
+        for (var i = 0; i <= samples; i++)
+        {
+            var t = (double)i / samples;
+            var point = Lerp(start, end, t);
+            var delta = Subtract(point, center);
+            var radial = Length(Cross(delta, axis));
+            if (radial <= radius)
+                return true;
+        }
+
+        return false;
+    }
+
+    private static bool IntersectsSphere(
+        SpherePrimitive sphere,
+        (double X, double Y, double Z) start,
+        (double X, double Y, double Z) end,
+        double margin)
+    {
+        var center = (sphere.CenterX, sphere.CenterY, sphere.CenterZ);
+        var radius = sphere.Radius + margin;
+        var samples = 8;
+
+        for (var i = 0; i <= samples; i++)
+        {
+            var point = Lerp(start, end, (double)i / samples);
+            if (Length(Subtract(point, center)) <= radius)
+                return true;
+        }
+
+        return false;
     }
 
     private static bool IntersectsSegment(
@@ -169,35 +269,10 @@ internal sealed class DefaultCollisionChecker : ICollisionChecker
         return tMin <= tMax;
     }
 
-    private static GotoPoint BuildSuggestedAvoidancePoint(
-        MeasurementStep step,
-        (double X, double Y, double Z) start,
-        MeasurementPlanOptions options)
-    {
-        var normal = ResolveSafetyNormal(step.SafetyPlane);
-        return new GotoPoint
-        {
-            Id = $"avoid_{step.SequenceNumber}",
-            X = start.X + normal.X * options.CollisionLiftClearanceMm,
-            Y = start.Y + normal.Y * options.CollisionLiftClearanceMm,
-            Z = start.Z + normal.Z * options.CollisionLiftClearanceMm,
-            Reason = "Suggested collision avoidance point"
-        };
-    }
-
     private static double ResolveProbeRadius(MeasurementStep step)
     {
         var diameter = step.ProbeAssignment?.TipDiameter ?? 2.0;
         return double.IsFinite(diameter) && diameter > 0 ? diameter / 2.0 : 1.0;
-    }
-
-    private static (double X, double Y, double Z) ResolveSafetyNormal(ISafetyPlane? safetyPlane)
-    {
-        if (safetyPlane is null)
-            return (0, 0, 1);
-
-        var direction = safetyPlane.GetDirection();
-        return Normalize((direction.I, direction.J, direction.K));
     }
 
     private static (double X, double Y, double Z) Normalize((double X, double Y, double Z) value)
@@ -211,11 +286,38 @@ internal sealed class DefaultCollisionChecker : ICollisionChecker
         (double X, double Y, double Z) right) =>
         (left.X + right.X, left.Y + right.Y, left.Z + right.Z);
 
+    private static (double X, double Y, double Z) Subtract(
+        (double X, double Y, double Z) left,
+        (double X, double Y, double Z) right) =>
+        (left.X - right.X, left.Y - right.Y, left.Z - right.Z);
+
     private static (double X, double Y, double Z) Scale((double X, double Y, double Z) value, double scale) =>
         (value.X * scale, value.Y * scale, value.Z * scale);
 
+    private static (double X, double Y, double Z) Lerp(
+        (double X, double Y, double Z) start,
+        (double X, double Y, double Z) end,
+        double t) =>
+        (
+            start.X + (end.X - start.X) * t,
+            start.Y + (end.Y - start.Y) * t,
+            start.Z + (end.Z - start.Z) * t);
+
+    private static double Length((double X, double Y, double Z) value) =>
+        Math.Sqrt(value.X * value.X + value.Y * value.Y + value.Z * value.Z);
+
+    private static (double X, double Y, double Z) Cross(
+        (double X, double Y, double Z) left,
+        (double X, double Y, double Z) right) =>
+        (
+            left.Y * right.Z - left.Z * right.Y,
+            left.Z * right.X - left.X * right.Z,
+            left.X * right.Y - left.Y * right.X);
+
     private readonly record struct CollisionBox(
         string ElementId,
+        Primitive? Primitive,
+        double Margin,
         double MinX,
         double MinY,
         double MinZ,
