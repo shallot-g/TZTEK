@@ -154,7 +154,10 @@ new MeasurementPlanOptions
     EnableCollisionAvoidance = true,
     EnableContinuousFeaturePath = true,
     EnableContinuousCylinderPath = true,
-    EnableSinglePointSafetyPath = true
+    EnableSinglePointSafetyPath = true,
+    EnableCollisionCheck = true,
+    CollisionSafetyMarginMm = 2.0,
+    CollisionLiftClearanceMm = 10.0
 }
 ```
 
@@ -164,6 +167,9 @@ new MeasurementPlanOptions
 - `EnableContinuousFeaturePath`：平面、圆、圆弧、线、圆锥、球等是否按特征连续测量。
 - `EnableContinuousCylinderPath`：圆柱是否使用连续测量；空心圆柱会用“同轴小半径为内孔候选”的第一版启发式修正接近方向。
 - `EnableSinglePointSafetyPath`：当不适合连续测量时，是否退回“每个测点回安全平面”的保守策略。
+- `EnableCollisionCheck`：是否启用第一版保守碰撞检测。
+- `CollisionSafetyMarginMm`：碰撞体额外膨胀余量。
+- `CollisionLiftClearanceMm`：检测到碰撞后沿当前安全平面法向绕行的距离。
 
 已验证的 `圆柱.stp` 测试结果：
 
@@ -179,20 +185,63 @@ Movement 256, Measurement 98, TotalPath 17329.210 mm
 
 当前默认特征级连续：
 Movement 114, Measurement 98, TotalPath 3902.866 mm
+
+开启第一版碰撞检测：
+Movement 128, Measurement 98, TotalPath 4042.866 mm
 ```
 
-注意：当前仍不是完整真实碰撞检测。现在的 `DefaultSafePathPlanner.AddMovement(...)`
-生成的是直线 `GotoPoint` 移动。后续接入障碍物、夹具、探针半径、工件网格或 RRT/A* 时，建议在这一层替换为：
+## 第一版碰撞检测
+
+当前实现了原型级碰撞检测，核心接口位于 `Interfaces.Pipeline` 命名空间，普通调用方不需要直接调用：
+
+- `ICollisionChecker`
+- `IPathCollisionResolver`
+
+默认实现位于 Core 层：
+
+- `DefaultCollisionChecker`
+- `DefaultPathCollisionResolver`
+
+运行逻辑：
 
 ```text
-起点 / 终点
-→ 碰撞检测
+MeasurementTask
+→ 生成 Movement / Measurement 路径
+→ 收集工件基元并生成简化 AABB 碰撞体
+→ 按默认探针半径和安全余量膨胀 AABB
+→ 检测 Movement 线段是否穿过碰撞体
+→ 如果有碰撞，沿当前 SafetyPlane 法向插入绕行 Movement
+```
+
+绕行方向不是固定向上，而是优先使用当前步骤的局部安全平面方向：
+
+```text
+当前点
+→ 当前点 + SafetyPlane.Normal * CollisionLiftClearanceMm
+→ 目标点 + SafetyPlane.Normal * CollisionLiftClearanceMm
+→ 目标点
+```
+
+这样后续如果加入侧向探针姿态，可以为侧面孔配置 `Normal = (1,0,0)` 或 `(0,1,0)` 的局部安全平面，绕行方向会跟随姿态变化，而不是统一向 `+Z` 抬高。
+
+当前碰撞检测仍是保守近似，不等价于真实 CAD 实体碰撞：
+
+- 使用 AABB 包围盒，可能误报碰撞。
+- 默认使用 2 mm 触发式探针近似，不做多探针选择。
+- 特征内部接近/测量/退出段会尽量避免误判正常测量接触。
+- 暂不处理夹具、工作台、机床行程、测头体积、探针杆精确模型。
+
+后续如需升级为更真实的避障，优先替换 `IPathCollisionResolver`：
+
+```text
+直线 Movement
+→ 网格/实体碰撞检测
 → 无碰撞：保留直线移动
-→ 有碰撞：插入绕障 GotoPoint 或采样路径
+→ 有碰撞：生成绕障 GotoPoint、A*、RRT 或其它采样路径
 ```
 
 底面不可测、夹具遮挡、探针是否能进入小孔，目前还没有作为强规则过滤。后续建议在 `IFeatureRecognizer`
-或独立的“可达性分析”服务中处理，再进入测点生成和安全路径规划。
+或独立的“可达性分析”服务中处理，再进入测点生成、安全路径规划和碰撞检测。
 
 ## 协作规则
 

@@ -18,6 +18,9 @@ public sealed class MeasurementPlanOptions
     public bool EnableContinuousFeaturePath { get; set; } = true;
     public bool EnableContinuousCylinderPath { get; set; } = true;
     public bool EnableSinglePointSafetyPath { get; set; } = true;
+    public bool EnableCollisionCheck { get; set; } = true;
+    public double CollisionSafetyMarginMm { get; set; } = 2.0;
+    public double CollisionLiftClearanceMm { get; set; } = 10.0;
     public ToleranceStandard ToleranceStandard { get; set; } = ToleranceStandard.ASME;
     public NamingRule? NamingRule { get; set; }
 

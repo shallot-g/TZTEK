@@ -4,6 +4,13 @@ internal sealed class DefaultSafePathPlanner : ISafePathPlanner
 {
     private const double DefaultMachineSpeedMmPerSecond = 20.0;
 
+    private readonly IPathCollisionResolver _collisionResolver;
+
+    public DefaultSafePathPlanner(IPathCollisionResolver collisionResolver)
+    {
+        _collisionResolver = collisionResolver;
+    }
+
     public MeasurementTask ApplySafetyPath(MeasurementTask task, MeasurementPlanOptions options)
     {
         var safeZ = ResolveSafetyZ(task, options);
@@ -58,7 +65,7 @@ internal sealed class DefaultSafePathPlanner : ISafePathPlanner
         }
 
         var totalLength = expandedSteps.Sum(step => step.TravelDistanceMm ?? 0);
-        return new MeasurementTask
+        var safeTask = new MeasurementTask
         {
             TaskId = task.TaskId,
             Name = task.Name,
@@ -73,6 +80,10 @@ internal sealed class DefaultSafePathPlanner : ISafePathPlanner
             TotalPathLengthMm = totalLength,
             EstimatedTotalTimeSeconds = totalLength / DefaultMachineSpeedMmPerSecond
         };
+
+        return options.EnableCollisionCheck
+            ? _collisionResolver.Resolve(safeTask, options)
+            : safeTask;
     }
 
     private static void AddSinglePointSafetyPath(
