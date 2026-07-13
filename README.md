@@ -301,6 +301,108 @@ MeasurementTask
 底面不可测、夹具遮挡、探针是否能进入小孔，目前还没有作为强规则过滤。后续建议在 `IFeatureRecognizer`
 或独立的“可达性分析”服务中处理，再进入测点生成、安全路径规划和碰撞检测。
 
+## 可视化演示平台
+
+仓库内新增本地 Web 演示台：
+
+```text
+TZTEK.VispecCMM.Demo.Api   ASP.NET Core 会话 API 和静态页面服务
+TZTEK.VispecCMM.Demo.Web   React / TypeScript / Three.js 工作台
+```
+
+演示平台当前只公开支持 `.stp/.step`，DXF 暂不作为汇报演示输入。它通过现有
+`IPrimitiveToleranceService` 完成导入和测量任务生成，不直接调用内部 Pipeline 接口。
+
+### 本次可视化改动摘要
+
+- 新增 ASP.NET Core Demo API，负责文件上传、异步解析会话、测量任务生成、临时 STL 导出和结果查询。
+- 新增 React / TypeScript / Three.js 工作台，以浏览器方式展示工件、识别基元、测点、探针和运动路径。
+- 同一次 STEP 导入分别生成基础路径和优化路径，用于对比连续特征测量、碰撞检测和自动安全 GOTO 的效果。
+- 新增 `tools/import_parser/export_visual_mesh.py`，使用 CadQuery 将 STEP 临时转换为 STL；STL 仅用于显示，测量数据仍来自原有基元解析流水线。
+- 新增会话隔离与临时文件清理，避免多个演示任务互相覆盖；上传文件和生成资源默认在两小时后清理。
+- 新增 Playwright 页面回归测试，覆盖 `1366x768`、`1440x900` 和 `1920x1080` 三种汇报分辨率。
+- Demo 上传接口和界面当前只接受 `.stp/.step`；DXF 核心代码仍保留，但本阶段不对外展示或承诺支持。
+
+主要展示内容：
+
+- STEP 工件 STL 外壳和识别基元。
+- 测量点、测点法向和选中元素的测点编号。
+- 默认触发式探针及路径逐步播放。
+- Movement、Measurement、自动 GOTO 和风险路径分色。
+- 基础路径与优化路径切换。
+- 基元数、测点数、路径长度、预计时间和 GOTO 数量对比。
+- 顶视、前视、侧视、轴测视角和图层开关。
+
+### 界面数据说明
+
+左侧“识别元素”同时保留了最终测量特征和原始 STEP 曲面，二者含义不同：
+
+- `CY1`、`CY2`、`PL1`、`PL2` 等名称表示经过筛选、分组和命名后进入测量计划的特征；其下方会显示已分配的测点数量。
+- `step_face_0005` 等名称表示 STEP 文件中的原始 CAD 面编号，用于追溯解析结果，并不代表一种新的基元类型。
+- 原始面显示 `0 点` 表示该面被成功解析并保留，但没有独立进入当前测量计划，探针不会执行该元素。
+
+一个真实孔或圆柱通常由多个 STEP 拓扑面组成，因此原始面数量可能多于最终测量特征数量。后续界面可进一步拆分为“测量特征”和“原始 CAD 曲面”两个分组。
+
+首次运行：
+
+```powershell
+cd D:\summer_stage\project\TZTEK
+$env:TZTEK_PARSER_PYTHON="D:\summer_stage\project\TZTEK\.venv-step\Scripts\python.exe"
+
+cd TZTEK.VispecCMM.Demo.Web
+npm install
+npm run build
+
+cd ..
+dotnet run --project TZTEK.VispecCMM.Demo.Api
+```
+
+如果提示 `address already in use`，说明 `5078` 端口上的 Demo 服务已经启动，不需要重复运行，直接在浏览器访问即可。需要重启服务时可先执行：
+
+```powershell
+Get-NetTCPConnection -LocalPort 5078 |
+    Select-Object -ExpandProperty OwningProcess |
+    ForEach-Object { Stop-Process -Id $_ -Force }
+```
+
+浏览器打开：
+
+```text
+http://localhost:5078
+```
+
+页面内置两个示例入口：
+
+- `圆柱.stp`：98 个测点、自动安全 GOTO、人工 GOTO 为 0。
+- `B23CD83-05-02V1.0.stp`：复杂工件、多种基元和大规模路径。
+
+开发模式可分别启动 API 和 Vite：
+
+```powershell
+dotnet run --project TZTEK.VispecCMM.Demo.Api
+
+cd TZTEK.VispecCMM.Demo.Web
+npm run dev
+```
+
+前端构建与浏览器验证：
+
+```powershell
+cd TZTEK.VispecCMM.Demo.Web
+npm run build
+npm run test:e2e
+```
+
+上传文件、会话数据和生成的 STL 存放在系统临时目录，默认两小时后清理，不提交到 GitHub。
+当前显示的 STL 只用于可视化，碰撞检测仍是 AABB 粗筛加部分基元窄相检查，不能宣称为工业级实体碰撞。
+
+### 已验证结果
+
+- `dotnet build TZTEK.VispecCMM.sln --nologo`：0 个警告，0 个错误。
+- `npm run build`：前端生产构建通过。
+- `npm run test:e2e`：三个桌面分辨率的浏览器测试全部通过。
+- `圆柱.stp`：识别 6 个基元、4 个测量特征、98 个测点，优化路径约 `4014.9 mm`，人工 GOTO 为 0。
+
 ## 协作规则
 
 可以提交：

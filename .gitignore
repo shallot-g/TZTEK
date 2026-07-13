@@ -14,6 +14,13 @@ tools/import_parser/.venv/
 tools/import_parser/__pycache__/
 tools/import_parser/output/
 tools/import_parser/.pytest_cache/
+TZTEK.VispecCMM.Demo.Web/node_modules/
+TZTEK.VispecCMM.Demo.Web/test-results/
+TZTEK.VispecCMM.Demo.Web/playwright-report/
+TZTEK.VispecCMM.Demo.Api/wwwroot/
+TZTEK.VispecCMM.Demo.Web/*.tsbuildinfo
+TZTEK.VispecCMM.Demo.Web/vite.config.js
+TZTEK.VispecCMM.Demo.Web/vite.config.d.ts
 
 # Model weights and local caches
 *.onnx

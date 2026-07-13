@@ -1,0 +1,116 @@
+namespace TZTEK.VispecCMM.Demo.Api.Models;
+
+public sealed class DemoSessionDto
+{
+    public string Id { get; init; } = string.Empty;
+    public string Status { get; set; } = "Queued";
+    public int Progress { get; set; }
+    public string Stage { get; set; } = "等待处理";
+    public string? Error { get; set; }
+    public VisualizationResultDto? Result { get; set; }
+}
+
+public sealed class VisualizationResultDto
+{
+    public string SessionId { get; init; } = string.Empty;
+    public string FileName { get; init; } = string.Empty;
+    public string SourceType { get; init; } = string.Empty;
+    public string? ModelUrl { get; init; }
+    public IReadOnlyList<VisualizationFeatureDto> Features { get; init; } = [];
+    public VisualizationPathPlanDto BaselinePlan { get; init; } = new();
+    public VisualizationPathPlanDto OptimizedPlan { get; init; } = new();
+    public VisualizationProbeDto? Probe { get; init; }
+    public IReadOnlyList<VisualizationWarningDto> Warnings { get; init; } = [];
+    public VisualizationBoundsDto Bounds { get; init; } = new();
+}
+
+public sealed class VisualizationFeatureDto
+{
+    public string Id { get; init; } = string.Empty;
+    public string Name { get; init; } = string.Empty;
+    public string Type { get; init; } = string.Empty;
+    public double[] Position { get; init; } = [0, 0, 0];
+    public double[] Direction { get; init; } = [0, 0, 1];
+    public double? Radius { get; init; }
+    public double? Area { get; init; }
+    public double? AngleRad { get; init; }
+    public string? SurfaceType { get; init; }
+    public string? FittingMethod { get; init; }
+    public IReadOnlyList<string> Tolerances { get; init; } = [];
+    public IReadOnlyList<VisualizationPointDto> MeasurementPoints { get; init; } = [];
+}
+
+public sealed class VisualizationPointDto
+{
+    public int Index { get; init; }
+    public double[] Position { get; init; } = [0, 0, 0];
+    public double[] Normal { get; init; } = [0, 0, 1];
+    public double ApproachDistance { get; init; }
+    public double RetractDistance { get; init; }
+    public double SearchDistance { get; init; }
+}
+
+public sealed class VisualizationPathPlanDto
+{
+    public string Name { get; init; } = string.Empty;
+    public IReadOnlyList<VisualizationPathSegmentDto> Segments { get; init; } = [];
+    public VisualizationStatisticsDto Statistics { get; init; } = new();
+}
+
+public sealed record VisualizationPathSegmentDto
+{
+    public int Sequence { get; init; }
+    public string Kind { get; init; } = string.Empty;
+    public string Name { get; init; } = string.Empty;
+    public string? FeatureId { get; init; }
+    public double[] Start { get; init; } = [0, 0, 0];
+    public double[] End { get; init; } = [0, 0, 0];
+    public bool IsGoto { get; init; }
+    public bool IsAutoGoto { get; init; }
+    public bool HasRisk { get; init; }
+    public string? Reason { get; init; }
+    public double DistanceMm { get; init; }
+}
+
+public sealed class VisualizationStatisticsDto
+{
+    public int PrimitiveCount { get; init; }
+    public int FeatureCount { get; init; }
+    public int MeasurementPointCount { get; init; }
+    public int MovementCount { get; init; }
+    public int MeasurementCount { get; init; }
+    public int GotoCount { get; init; }
+    public int AutoGotoCount { get; init; }
+    public int ManualGotoCount { get; init; }
+    public double TotalPathLengthMm { get; init; }
+    public double EstimatedTimeSeconds { get; init; }
+}
+
+public sealed class VisualizationProbeDto
+{
+    public string Name { get; init; } = string.Empty;
+    public string Type { get; init; } = string.Empty;
+    public double TipDiameterMm { get; init; }
+    public double TipLengthMm { get; init; }
+    public double AngleADeg { get; init; }
+    public double AngleBDeg { get; init; }
+}
+
+public sealed class VisualizationWarningDto
+{
+    public string Level { get; init; } = "Info";
+    public string Message { get; init; } = string.Empty;
+}
+
+public sealed class VisualizationBoundsDto
+{
+    public double[] Min { get; init; } = [0, 0, 0];
+    public double[] Max { get; init; } = [0, 0, 0];
+}
+
+public sealed class DemoExampleDto
+{
+    public string Id { get; init; } = string.Empty;
+    public string Name { get; init; } = string.Empty;
+    public string Description { get; init; } = string.Empty;
+}
