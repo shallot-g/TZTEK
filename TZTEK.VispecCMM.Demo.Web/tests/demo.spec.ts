@@ -2,6 +2,7 @@ import { expect, test } from '@playwright/test'
 import { PNG } from 'pngjs'
 
 let sessionId = ''
+let sessionResult: any
 
 test.beforeAll(async ({ request }) => {
   const created = await request.post('/api/demo/sessions/examples/cylinder')
@@ -11,11 +12,41 @@ test.beforeAll(async ({ request }) => {
   for (let attempt = 0; attempt < 120; attempt++) {
     const response = await request.get(`/api/demo/sessions/${sessionId}`)
     const session = await response.json()
-    if (session.status === 'Completed') return
+    if (session.status === 'Completed') {
+      sessionResult = session.result
+      return
+    }
     if (session.status === 'Failed') throw new Error(session.error)
     await new Promise(resolve => setTimeout(resolve, 500))
   }
   throw new Error('演示会话处理超时')
+})
+
+test('圆柱使用有限曲面范围生成基元和测点', async () => {
+  const cylinders = sessionResult.features.filter((feature: any) => feature.isMeasurementFeature && feature.type === 'Cylinder')
+  expect(cylinders).toHaveLength(2)
+
+  for (const cylinder of cylinders) {
+    expect(cylinder.position[2]).toBeCloseTo(-128, 6)
+    expect(cylinder.length).toBeCloseTo(256, 6)
+    expect(cylinder.angularSpanRad).toBeCloseTo(Math.PI * 2, 6)
+    expect(cylinder.sourceElementIds).toHaveLength(2)
+    expect(cylinder.measurementPoints).toHaveLength(24)
+    const levels = [...new Set(cylinder.measurementPoints.map((point: any) => Number(point.position[2].toFixed(3))))]
+    expect(levels).toEqual([-204.8, -128, -51.2])
+  }
+
+  const inner = cylinders.find((feature: any) => feature.isInnerSurface)
+  const outer = cylinders.find((feature: any) => feature.isInnerSurface === false)
+  expect(inner.measurementPoints[0].normal[0]).toBeCloseTo(-1, 6)
+  expect(outer.measurementPoints[0].normal[0]).toBeCloseTo(1, 6)
+
+  const entry = sessionResult.optimizedPlan.segments.find((segment: any) =>
+    segment.featureId === inner.id && segment.name === 'Enter cylinder measurement path')
+  const firstPoint = inner.measurementPoints[0]
+  const approachOffset = entry.end.map((value: number, index: number) => value - firstPoint.position[index])
+  const outwardDistance = approachOffset.reduce((sum: number, value: number, index: number) => sum + value * firstPoint.normal[index], 0)
+  expect(outwardDistance).toBeGreaterThan(0)
 })
 
 for (const viewport of [
@@ -28,6 +59,8 @@ for (const viewport of [
     await page.goto(`/?session=${sessionId}`)
     await expect(page.getByText('Vispec CMM')).toBeVisible()
     await expect(page.getByText('98', { exact: true })).toBeVisible()
+    await expect(page.locator('.feature-group-label').filter({ hasText: /^测量特征$/ })).toBeVisible()
+    await expect(page.locator('.feature-group-label').filter({ hasText: /^原始 CAD 曲面$/ })).toBeVisible()
     const canvas = page.locator('.viewer-host canvas')
     await expect(canvas).toBeVisible()
     await page.waitForTimeout(1500)

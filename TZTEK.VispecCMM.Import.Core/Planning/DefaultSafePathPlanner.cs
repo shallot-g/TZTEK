@@ -29,7 +29,6 @@ internal sealed class DefaultSafePathPlanner : ISafePathPlanner
             if (options.EnableContinuousCylinderPath
                 && step.TargetItem?.Primitive is CylinderPrimitive)
             {
-                var invertApproach = ShouldInvertCylinderApproach(step, task.Steps);
                 AddContinuousFeaturePath(
                     expandedSteps,
                     ref previous,
@@ -38,7 +37,7 @@ internal sealed class DefaultSafePathPlanner : ISafePathPlanner
                     safeZ,
                     options,
                     task.GlobalSafetyPlane,
-                    invertApproach,
+                    invertApproach: false,
                     "cylinder");
                 continue;
             }
@@ -103,8 +102,8 @@ internal sealed class DefaultSafePathPlanner : ISafePathPlanner
 
             var measure = (point.X, point.Y, point.Z);
             var safeAbove = (point.X, point.Y, safeZ);
-            var approach = OffsetAlongNormal(measure, normal, -approachDistance);
-            var retract = OffsetAlongNormal(measure, normal, -retractDistance);
+            var approach = OffsetAlongNormal(measure, normal, approachDistance);
+            var retract = OffsetAlongNormal(measure, normal, retractDistance);
 
             AddMovement(steps, ref previous, sourceStep, safeAbove, "Move to safety plane", safetyPlane);
             AddMovement(steps, ref previous, sourceStep, approach, "Move to approach point", safetyPlane);
@@ -130,7 +129,7 @@ internal sealed class DefaultSafePathPlanner : ISafePathPlanner
         var firstNormal = ResolveApproachNormal(firstPoint, invertApproach);
         var firstApproachDistance = PositiveOrDefault(firstPoint.ApproachDistance, options.DefaultApproachDistanceMm);
         var firstSafeAbove = (firstPoint.X, firstPoint.Y, safeZ);
-        var firstApproach = OffsetAlongNormal(firstMeasure, firstNormal, -firstApproachDistance);
+        var firstApproach = OffsetAlongNormal(firstMeasure, firstNormal, firstApproachDistance);
 
         AddMovement(steps, ref previous, sourceStep, firstSafeAbove, $"Move to {featureName} safety plane", safetyPlane);
         AddMovement(steps, ref previous, sourceStep, firstApproach, $"Enter {featureName} measurement path", safetyPlane);
@@ -140,7 +139,7 @@ internal sealed class DefaultSafePathPlanner : ISafePathPlanner
             var normal = ResolveApproachNormal(point, invertApproach);
             var approachDistance = PositiveOrDefault(point.ApproachDistance, options.DefaultApproachDistanceMm);
             var measure = (point.X, point.Y, point.Z);
-            var approach = OffsetAlongNormal(measure, normal, -approachDistance);
+            var approach = OffsetAlongNormal(measure, normal, approachDistance);
 
             AddMovement(steps, ref previous, sourceStep, approach, $"Move to next {featureName} approach point", safetyPlane);
             AddMeasurement(steps, ref previous, sourceStep, point);
@@ -150,7 +149,7 @@ internal sealed class DefaultSafePathPlanner : ISafePathPlanner
         var lastNormal = ResolveApproachNormal(lastPoint, invertApproach);
         var retractDistance = PositiveOrDefault(lastPoint.RetractDistance, options.DefaultRetractDistanceMm);
         var lastMeasure = (lastPoint.X, lastPoint.Y, lastPoint.Z);
-        var retract = OffsetAlongNormal(lastMeasure, lastNormal, -retractDistance);
+        var retract = OffsetAlongNormal(lastMeasure, lastNormal, retractDistance);
         var safeAbove = (lastPoint.X, lastPoint.Y, safeZ);
 
         AddMovement(steps, ref previous, sourceStep, retract, $"Exit {featureName} measurement path", safetyPlane);
@@ -276,37 +275,6 @@ internal sealed class DefaultSafePathPlanner : ISafePathPlanner
             PrimitiveType.Sphere => "sphere",
             _ => "feature"
         };
-    }
-
-    private static bool ShouldInvertCylinderApproach(
-        MeasurementStep sourceStep,
-        IReadOnlyList<MeasurementStep> allSteps)
-    {
-        if (sourceStep.TargetItem?.Primitive is not CylinderPrimitive cylinder)
-            return false;
-
-        // 第一版内孔启发式：同轴圆柱中半径更小者按内孔候选处理。
-        return allSteps
-            .Select(step => step.TargetItem?.Primitive)
-            .OfType<CylinderPrimitive>()
-            .Any(other => !ReferenceEquals(other, cylinder)
-                && IsSameAxis(cylinder, other)
-                && cylinder.Radius < other.Radius - 0.01);
-    }
-
-    private static bool IsSameAxis(CylinderPrimitive left, CylinderPrimitive right)
-    {
-        var leftDir = Normalize(left.AxisDirX, left.AxisDirY, left.AxisDirZ);
-        var rightDir = Normalize(right.AxisDirX, right.AxisDirY, right.AxisDirZ);
-        if (Math.Abs(Dot(leftDir, rightDir)) < 0.995)
-            return false;
-
-        var delta = (
-            right.AxisPointX - left.AxisPointX,
-            right.AxisPointY - left.AxisPointY,
-            right.AxisPointZ - left.AxisPointZ);
-
-        return Length(Cross(delta, leftDir)) <= 0.05;
     }
 
     private static (double X, double Y, double Z) Normalize(double x, double y, double z)

@@ -166,7 +166,17 @@ public sealed class PrimitiveToleranceExtractor : IPrimitiveToleranceExtractor
                 SourceElementId = element.Id,
                 AxisPoint = ReadPoint(geometry, "axisPoint"),
                 AxisDirection = ReadPoint(geometry, "axisDirection") ?? ReadPoint(geometry, "axisDir"),
+                AxisStart = ReadPoint(geometry, "axisStart"),
+                AxisEnd = ReadPoint(geometry, "axisEnd"),
+                AxisCenter = ReadPoint(geometry, "axisCenter"),
+                RadialReference = ReadPoint(geometry, "radialReference"),
                 Radius = ReadDouble(geometry, "radius"),
+                Length = ReadDouble(geometry, "length"),
+                StartAngleRad = ReadDouble(geometry, "uMin") ?? ReadDouble(geometry, "startAngleRad"),
+                EndAngleRad = ReadDouble(geometry, "uMax") ?? ReadDouble(geometry, "endAngleRad"),
+                AngularSpanRad = ReadDouble(geometry, "angularSpanRad"),
+                IsInnerSurface = ReadBool(geometry, "isInnerSurface"),
+                SurfaceOrientation = ReadString(geometry, "surfaceOrientation"),
                 Area = ReadDouble(geometry, "area")
             },
             "SPHERE" => new StructuredPrimitiveDto
@@ -417,13 +427,29 @@ public sealed class PrimitiveToleranceExtractor : IPrimitiveToleranceExtractor
             Id = id,
             Name = name,
             SourceElementId = sourceElementId,
-            AxisPointX = Get(dto.AxisPoint, 0),
-            AxisPointY = Get(dto.AxisPoint, 1),
-            AxisPointZ = Get(dto.AxisPoint, 2),
+            AxisPointX = Get(dto.AxisCenter ?? dto.AxisPoint, 0),
+            AxisPointY = Get(dto.AxisCenter ?? dto.AxisPoint, 1),
+            AxisPointZ = Get(dto.AxisCenter ?? dto.AxisPoint, 2),
             AxisDirX = Get(dto.AxisDirection, 0),
             AxisDirY = Get(dto.AxisDirection, 1),
             AxisDirZ = Get(dto.AxisDirection, 2),
-            Radius = dto.Radius.Value
+            Radius = dto.Radius.Value,
+            AxisStartX = GetNullable(dto.AxisStart, 0),
+            AxisStartY = GetNullable(dto.AxisStart, 1),
+            AxisStartZ = GetNullable(dto.AxisStart, 2),
+            AxisEndX = GetNullable(dto.AxisEnd, 0),
+            AxisEndY = GetNullable(dto.AxisEnd, 1),
+            AxisEndZ = GetNullable(dto.AxisEnd, 2),
+            Length = dto.Length,
+            StartAngleRad = dto.StartAngleRad,
+            EndAngleRad = dto.EndAngleRad,
+            AngularSpanRad = dto.AngularSpanRad,
+            RadialReferenceX = GetNullable(dto.RadialReference, 0),
+            RadialReferenceY = GetNullable(dto.RadialReference, 1),
+            RadialReferenceZ = GetNullable(dto.RadialReference, 2),
+            IsInnerSurface = dto.IsInnerSurface,
+            SurfaceOrientation = dto.SurfaceOrientation,
+            SourceElementIds = dto.SourceElementIds.Count > 0 ? dto.SourceElementIds : [sourceElementId]
         };
     }
 
@@ -535,6 +561,24 @@ public sealed class PrimitiveToleranceExtractor : IPrimitiveToleranceExtractor
             : null;
     }
 
+    private static bool? ReadBool(JsonElement? element, string propertyName)
+    {
+        return element is not null
+            && element.Value.TryGetProperty(propertyName, out var property)
+            && property.ValueKind is JsonValueKind.True or JsonValueKind.False
+            ? property.GetBoolean()
+            : null;
+    }
+
+    private static string? ReadString(JsonElement? element, string propertyName)
+    {
+        return element is not null
+            && element.Value.TryGetProperty(propertyName, out var property)
+            && property.ValueKind == JsonValueKind.String
+            ? property.GetString()
+            : null;
+    }
+
     private static string NormalizeType(string value)
     {
         return value.Trim().Replace("-", "_", StringComparison.Ordinal).ToUpperInvariant();
@@ -543,6 +587,11 @@ public sealed class PrimitiveToleranceExtractor : IPrimitiveToleranceExtractor
     private static double Get(double[] values, int index)
     {
         return values.Length > index ? values[index] : 0;
+    }
+
+    private static double? GetNullable(double[]? values, int index)
+    {
+        return values is not null && values.Length > index ? values[index] : null;
     }
 
     private static T ParseEnum<T>(string? value, T fallback)

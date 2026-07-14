@@ -103,7 +103,8 @@ internal sealed class DefaultCollisionChecker : ICollisionChecker
     private static CollisionBox BuildCylinderBox(CylinderPrimitive cylinder, double margin)
     {
         var axis = Normalize((cylinder.AxisDirX, cylinder.AxisDirY, cylinder.AxisDirZ));
-        var length = Math.Max(cylinder.Radius, Math.Sqrt(cylinder.SourceAreaMm2 ?? 0) / Math.Max(cylinder.Radius * Math.PI * 2, 1));
+        var length = cylinder.Length
+            ?? Math.Max(cylinder.Radius, Math.Sqrt(cylinder.SourceAreaMm2 ?? 0) / Math.Max(cylinder.Radius * Math.PI * 2, 1));
         var center = (cylinder.AxisPointX, cylinder.AxisPointY, cylinder.AxisPointZ);
         var p0 = Add(center, Scale(axis, -length / 2));
         var p1 = Add(center, Scale(axis, length / 2));
@@ -199,6 +200,7 @@ internal sealed class DefaultCollisionChecker : ICollisionChecker
         var axis = Normalize((cylinder.AxisDirX, cylinder.AxisDirY, cylinder.AxisDirZ));
         var center = (cylinder.AxisPointX, cylinder.AxisPointY, cylinder.AxisPointZ);
         var radius = cylinder.Radius + margin;
+        var halfLength = (cylinder.Length ?? double.PositiveInfinity) / 2 + margin;
         var samples = 8;
 
         for (var i = 0; i <= samples; i++)
@@ -206,6 +208,8 @@ internal sealed class DefaultCollisionChecker : ICollisionChecker
             var t = (double)i / samples;
             var point = Lerp(start, end, t);
             var delta = Subtract(point, center);
+            if (Math.Abs(Dot(delta, axis)) > halfLength)
+                continue;
             var radial = Length(Cross(delta, axis));
             if (radial <= radius)
                 return true;
@@ -305,6 +309,11 @@ internal sealed class DefaultCollisionChecker : ICollisionChecker
 
     private static double Length((double X, double Y, double Z) value) =>
         Math.Sqrt(value.X * value.X + value.Y * value.Y + value.Z * value.Z);
+
+    private static double Dot(
+        (double X, double Y, double Z) left,
+        (double X, double Y, double Z) right) =>
+        left.X * right.X + left.Y * right.Y + left.Z * right.Z;
 
     private static (double X, double Y, double Z) Cross(
         (double X, double Y, double Z) left,

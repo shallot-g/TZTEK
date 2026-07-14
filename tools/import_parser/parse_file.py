@@ -132,6 +132,7 @@ def parse_step(path: Path) -> dict[str, Any]:
     try:
         import cadquery as cq  # type: ignore
         from OCP.BRepAdaptor import BRepAdaptor_Surface  # type: ignore
+        from OCP.TopAbs import TopAbs_FORWARD, TopAbs_REVERSED  # type: ignore
     except ModuleNotFoundError as exc:
         raise RuntimeError(
             "STEP parsing requires CadQuery. Install with: "
@@ -156,7 +157,9 @@ def parse_step(path: Path) -> dict[str, Any]:
             surface_type = safe_face_geom_type(face)
             center = cq_vector_to_list(face.Center())
             area = safe_float(lambda: face.Area(), 0.0)
-            geometry = step_face_geometry(face, surface_type, center, area, BRepAdaptor_Surface)
+            geometry = step_face_geometry(
+                face, surface_type, center, area, BRepAdaptor_Surface, TopAbs_FORWARD, TopAbs_REVERSED
+            )
 
             annotations = {
                 "source": "STEP",
@@ -203,7 +206,15 @@ def safe_face_geom_type(face: Any) -> str:
         return "UNKNOWN"
 
 
-def step_face_geometry(face: Any, surface_type: str, center: list[float], area: float, adaptor_type: Any) -> dict[str, Any]:
+def step_face_geometry(
+    face: Any,
+    surface_type: str,
+    center: list[float],
+    area: float,
+    adaptor_type: Any,
+    topabs_forward: Any,
+    topabs_reversed: Any,
+) -> dict[str, Any]:
     geometry: dict[str, Any] = {
         "surfaceType": surface_type,
         "center": center,
@@ -220,8 +231,36 @@ def step_face_geometry(face: Any, surface_type: str, center: list[float], area: 
     if surface_type == "CYLINDER":
         cylinder = adaptor.Cylinder()
         axis = cylinder.Axis()
-        geometry["axisPoint"] = ocp_point_to_list(axis.Location())
-        geometry["axisDirection"] = ocp_direction_to_list(axis.Direction())
+        axis_point = ocp_point_to_list(axis.Location())
+        axis_direction = ocp_direction_to_list(axis.Direction())
+        u_min = float(adaptor.FirstUParameter())
+        u_max = float(adaptor.LastUParameter())
+        v_min = float(adaptor.FirstVParameter())
+        v_max = float(adaptor.LastVParameter())
+        axis_start = add_scaled(axis_point, axis_direction, v_min)
+        axis_end = add_scaled(axis_point, axis_direction, v_max)
+        orientation = face.wrapped.Orientation()
+
+        geometry["axisPoint"] = axis_point
+        geometry["axisDirection"] = axis_direction
+        geometry["radialReference"] = ocp_direction_to_list(cylinder.Position().XDirection())
+        geometry["axisStart"] = axis_start
+        geometry["axisEnd"] = axis_end
+        geometry["axisCenter"] = midpoint(axis_start, axis_end)
+        geometry["length"] = distance(axis_start, axis_end)
+        geometry["uMin"] = u_min
+        geometry["uMax"] = u_max
+        geometry["angularSpanRad"] = max(0.0, u_max - u_min)
+        geometry["surfaceOrientation"] = (
+            "Reversed" if orientation == topabs_reversed
+            else "Forward" if orientation == topabs_forward
+            else "Unknown"
+        )
+        geometry["isInnerSurface"] = (
+            True if orientation == topabs_reversed
+            else False if orientation == topabs_forward
+            else None
+        )
         geometry["radius"] = float(cylinder.Radius())
         return geometry
 
@@ -262,6 +301,17 @@ def primitive_from_step_face(element_id: str, surface_type: str, geometry: dict[
             "sourceElementId": element_id,
             "axisPoint": geometry.get("axisPoint"),
             "axisDirection": geometry.get("axisDirection"),
+            "radialReference": geometry.get("radialReference"),
+            "axisStart": geometry.get("axisStart"),
+            "axisEnd": geometry.get("axisEnd"),
+            "axisCenter": geometry.get("axisCenter"),
+            "length": geometry.get("length"),
+            "startAngleRad": geometry.get("uMin"),
+            "endAngleRad": geometry.get("uMax"),
+            "angularSpanRad": geometry.get("angularSpanRad"),
+            "surfaceOrientation": geometry.get("surfaceOrientation"),
+            "isInnerSurface": geometry.get("isInnerSurface"),
+            "sourceElementIds": [element_id],
             "radius": geometry.get("radius"),
             "area": geometry.get("area"),
         }
@@ -325,6 +375,18 @@ def safe_float(factory: Any, fallback: float) -> float:
         return float(factory())
     except Exception:
         return fallback
+
+
+def add_scaled(point: list[float], direction: list[float], scale: float) -> list[float]:
+    return [point[index] + direction[index] * scale for index in range(3)]
+
+
+def midpoint(start: list[float], end: list[float]) -> list[float]:
+    return [(start[index] + end[index]) / 2.0 for index in range(3)]
+
+
+def distance(start: list[float], end: list[float]) -> float:
+    return math.sqrt(sum((end[index] - start[index]) ** 2 for index in range(3)))
 
 
 def cq_vector_to_list(value: Any) -> list[float]:

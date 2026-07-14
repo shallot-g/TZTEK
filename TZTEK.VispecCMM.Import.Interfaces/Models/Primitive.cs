@@ -125,6 +125,22 @@ public sealed class CylinderPrimitive : Primitive, ICylinderPrimitive
     public double AxisDirY { get; set; }
     public double AxisDirZ { get; set; }
     public double Radius { get; set; }
+    public double? AxisStartX { get; set; }
+    public double? AxisStartY { get; set; }
+    public double? AxisStartZ { get; set; }
+    public double? AxisEndX { get; set; }
+    public double? AxisEndY { get; set; }
+    public double? AxisEndZ { get; set; }
+    public double? Length { get; set; }
+    public double? StartAngleRad { get; set; }
+    public double? EndAngleRad { get; set; }
+    public double? AngularSpanRad { get; set; }
+    public double? RadialReferenceX { get; set; }
+    public double? RadialReferenceY { get; set; }
+    public double? RadialReferenceZ { get; set; }
+    public bool? IsInnerSurface { get; set; }
+    public string? SurfaceOrientation { get; set; }
+    public IReadOnlyList<string> SourceElementIds { get; set; } = [];
 
     public override (double X, double Y, double Z) GetRepresentativePoint() => (AxisPointX, AxisPointY, AxisPointZ);
     public override (double I, double J, double K) GetDirection() => Normalize(AxisDirX, AxisDirY, AxisDirZ);

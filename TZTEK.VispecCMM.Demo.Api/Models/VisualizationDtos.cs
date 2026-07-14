@@ -32,6 +32,16 @@ public sealed class VisualizationFeatureDto
     public double[] Position { get; init; } = [0, 0, 0];
     public double[] Direction { get; init; } = [0, 0, 1];
     public double? Radius { get; init; }
+    public double? Length { get; init; }
+    public double[]? AxisStart { get; init; }
+    public double[]? AxisEnd { get; init; }
+    public double? StartAngleRad { get; init; }
+    public double? AngularSpanRad { get; init; }
+    public double[]? RadialReference { get; init; }
+    public bool? IsInnerSurface { get; init; }
+    public IReadOnlyList<string> SourceElementIds { get; init; } = [];
+    public bool IsMeasurementFeature { get; init; }
+    public bool RequiresProbeReorientation { get; init; }
     public double? Area { get; init; }
     public double? AngleRad { get; init; }
     public string? SurfaceType { get; init; }

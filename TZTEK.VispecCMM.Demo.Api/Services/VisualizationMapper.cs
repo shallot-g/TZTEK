@@ -26,7 +26,8 @@ internal static class VisualizationMapper
                 .Select(MapPoint)
                 .ToList() ?? [];
             var fitting = steps?.Select(step => step.FittingMethod?.ToString()).FirstOrDefault(value => value is not null);
-            return MapFeature(item, points, fitting);
+            var measurementItem = steps?.Select(step => step.TargetItem).FirstOrDefault(value => value is not null);
+            return MapFeature(measurementItem ?? item, points, fitting, measurementItem is not null);
         }).ToList();
 
         var warnings = BuildWarnings(optimized, hasModel).ToList();
@@ -53,7 +54,8 @@ internal static class VisualizationMapper
     private static VisualizationFeatureDto MapFeature(
         PrimitiveToleranceItem item,
         IReadOnlyList<VisualizationPointDto> points,
-        string? fittingMethod)
+        string? fittingMethod,
+        bool isMeasurementFeature)
     {
         var primitive = item.Primitive;
         var position = primitive.GetRepresentativePoint();
@@ -74,6 +76,24 @@ internal static class VisualizationMapper
                 SpherePrimitive value => value.Radius,
                 _ => null
             },
+            Length = primitive is CylinderPrimitive finiteCylinder ? finiteCylinder.Length : null,
+            AxisStart = primitive is CylinderPrimitive { AxisStartX: not null, AxisStartY: not null, AxisStartZ: not null } startCylinder
+                ? [startCylinder.AxisStartX.Value, startCylinder.AxisStartY.Value, startCylinder.AxisStartZ.Value]
+                : null,
+            AxisEnd = primitive is CylinderPrimitive { AxisEndX: not null, AxisEndY: not null, AxisEndZ: not null } endCylinder
+                ? [endCylinder.AxisEndX.Value, endCylinder.AxisEndY.Value, endCylinder.AxisEndZ.Value]
+                : null,
+            StartAngleRad = primitive is CylinderPrimitive angularCylinder ? angularCylinder.StartAngleRad : null,
+            AngularSpanRad = primitive is CylinderPrimitive spanCylinder ? spanCylinder.AngularSpanRad : null,
+            RadialReference = primitive is CylinderPrimitive { RadialReferenceX: not null, RadialReferenceY: not null, RadialReferenceZ: not null } referenceCylinder
+                ? [referenceCylinder.RadialReferenceX.Value, referenceCylinder.RadialReferenceY.Value, referenceCylinder.RadialReferenceZ.Value]
+                : null,
+            IsInnerSurface = primitive is CylinderPrimitive orientedCylinder ? orientedCylinder.IsInnerSurface : null,
+            SourceElementIds = primitive is CylinderPrimitive sourceCylinder
+                ? sourceCylinder.SourceElementIds
+                : [primitive.SourceElementId],
+            IsMeasurementFeature = isMeasurementFeature,
+            RequiresProbeReorientation = isMeasurementFeature && primitive is CylinderPrimitive,
             Area = primitive.SourceAreaMm2,
             AngleRad = primitive is ConePrimitive cone ? cone.HalfAngleRad : null,
             SurfaceType = primitive is Surface3DPrimitive surface ? surface.SurfaceType : null,
@@ -210,6 +230,14 @@ internal static class VisualizationMapper
             {
                 Level = "Warning",
                 Message = "部分路径需要人工设置安全 GOTO 点。"
+            };
+        }
+        if (task.Steps.Any(step => step.TargetItem?.Primitive is CylinderPrimitive))
+        {
+            yield return new VisualizationWarningDto
+            {
+                Level = "Warning",
+                Message = "圆柱径向测量需要转角测头或侧向探针；当前默认竖直探针路径仅展示几何规划结果。"
             };
         }
     }

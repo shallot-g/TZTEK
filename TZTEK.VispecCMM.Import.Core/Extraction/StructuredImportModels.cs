@@ -24,8 +24,17 @@ internal sealed class StructuredPrimitiveDto
     public double[]? Normal { get; set; }
     public double[]? AxisPoint { get; set; }
     public double[]? AxisDirection { get; set; }
+    public double[]? AxisStart { get; set; }
+    public double[]? AxisEnd { get; set; }
+    public double[]? AxisCenter { get; set; }
+    public double[]? RadialReference { get; set; }
     public double[]? Apex { get; set; }
     public double? Radius { get; set; }
+    public double? Length { get; set; }
+    public double? AngularSpanRad { get; set; }
+    public bool? IsInnerSurface { get; set; }
+    public string? SurfaceOrientation { get; set; }
+    public List<string> SourceElementIds { get; set; } = [];
     public double? Area { get; set; }
     public double? StartAngleRad { get; set; }
     public double? EndAngleRad { get; set; }

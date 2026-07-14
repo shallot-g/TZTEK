@@ -35,6 +35,16 @@ export interface VisualizationFeature {
   position: Vec3
   direction: Vec3
   radius?: number
+  length?: number
+  axisStart?: Vec3
+  axisEnd?: Vec3
+  startAngleRad?: number
+  angularSpanRad?: number
+  radialReference?: Vec3
+  isInnerSurface?: boolean
+  sourceElementIds: string[]
+  isMeasurementFeature: boolean
+  requiresProbeReorientation: boolean
   area?: number
   angleRad?: number
   surfaceType?: string

@@ -81,6 +81,29 @@ python tools/import_parser/parse_file.py --format dxf --input sample.dxf
 
 STP 第一版面向三坐标测量候选基元提取，输出平面、圆柱、圆锥、球面和自由曲面候选；不解析完整 PMI/GD&T 公差。
 
+### STEP 有限圆柱解析
+
+圆柱不再只保存无限解析曲面的轴原点。STEP sidecar 现在从 OCP 曲面参数中提取：
+
+```text
+axisStart / axisEnd / axisCenter / length
+uMin / uMax / angularSpanRad
+radialReference / surfaceOrientation / isInnerSurface
+```
+
+这些字段用于保证解析、测点、碰撞包围盒和前端显示使用同一份有限几何数据：
+
+- `axisCenter` 是圆柱有效轴段的中心，不能用 OpenCascade 的轴原点代替。
+- 被 STEP 拆分的互补圆柱面会按轴线、半径、轴向区间、周向区间和内外属性合并。
+- 同轴同半径但轴向分离的孔不会被错误合并。
+- `REVERSED` 实体面作为内孔壁候选，`FORWARD` 作为外圆柱面候选；无法确认时保留未确定状态。
+- 圆柱默认在有效长度的 `20% / 50% / 80%` 位置生成三层测点，每层 8 点。
+- 外圆柱法向指向实体外部，内孔法向指向孔腔；接近点和回退点沿自由空间法向生成。
+
+`圆柱.stp` 当前解析结果为两个最终圆柱测量特征：内圆柱半径约 `16.056 mm`、外圆柱半径约 `38.715 mm`，二者长度均约 `256 mm`、轴向中心均约为 `Z=-128 mm`，每个特征生成 24 个测点。
+
+注意：默认竖直探针无法直接完成圆柱径向接触。当前系统会保留几何测点用于规划演示，并在界面标记“需转角测头或侧向探针”；不能将该路径直接宣称为真实设备可执行程序。
+
 ## 测量计划数据输出
 
 导入完成后，可以通过 `IPrimitiveToleranceService.GenerateMeasurementTasks()` 生成路径规划可用的数据：
@@ -342,6 +365,8 @@ TZTEK.VispecCMM.Demo.Web   React / TypeScript / Three.js 工作台
 - 原始面显示 `0 点` 表示该面被成功解析并保留，但没有独立进入当前测量计划，探针不会执行该元素。
 
 一个真实孔或圆柱通常由多个 STEP 拓扑面组成，因此原始面数量可能多于最终测量特征数量。后续界面可进一步拆分为“测量特征”和“原始 CAD 曲面”两个分组。
+
+当前界面已经按“测量特征”和“原始 CAD 曲面”分组。圆柱详情额外显示真实长度、轴向起止点、内孔/外圆柱属性和参与合并的来源面；Three.js 使用有限长度和 STEP 径向参考方向绘制，不再通过面积猜测圆柱长度。
 
 首次运行：
 

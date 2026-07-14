@@ -96,6 +96,7 @@ button:disabled { opacity: 0.42; cursor: default; }
 .search-box { height: 35px; margin: 9px; display: flex; align-items: center; gap: 7px; padding: 0 9px; border: 1px solid #343d46; border-radius: 4px; background: #101419; color: #7f8b96; }
 .search-box input { min-width: 0; flex: 1; background: none; border: 0; outline: 0; color: #e1e7eb; font-size: 12px; }
 .feature-list { flex: 1; overflow-y: auto; padding: 0 7px 8px; }
+.feature-group-label { height: 28px; display: flex; align-items: center; padding: 0 7px; color: #8d99a4; font-size: 10px; font-weight: 600; border-bottom: 1px solid #303840; }
 .feature-row { width: 100%; min-height: 47px; height: auto; display: grid; grid-template-columns: 9px minmax(0, 1fr) 14px; align-items: center; gap: 9px; border: 0; border-bottom: 1px solid #252c33; border-radius: 0; background: transparent; text-align: left; padding: 6px 7px; }
 .feature-row:hover:not(:disabled) { background: #1e252c; border-color: #252c33; }
 .feature-row.selected { background: #25313a; box-shadow: inset 2px 0 #50a8d8; }

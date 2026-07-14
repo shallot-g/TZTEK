@@ -123,26 +123,38 @@ internal sealed class DefaultMeasurementPointPlanner : IMeasurementPointPlanner
     private static List<MeasurementPoint> PlanCylinder(CylinderPrimitive cylinder, MeasurementPlanOptions options)
     {
         var axis = Normalize((cylinder.AxisDirX, cylinder.AxisDirY, cylinder.AxisDirZ));
-        var (u, v) = BuildBasis(axis);
+        if (cylinder.Length is null || cylinder.Length <= 1e-9)
+            return [];
+
+        var hasReference = cylinder.RadialReferenceX is not null
+            && cylinder.RadialReferenceY is not null
+            && cylinder.RadialReferenceZ is not null;
+        var u = hasReference
+            ? Normalize((cylinder.RadialReferenceX!.Value, cylinder.RadialReferenceY!.Value, cylinder.RadialReferenceZ!.Value))
+            : BuildBasis(axis).U;
+        var v = Normalize(Cross(axis, u));
         var radialCount = Math.Max(3, options.CylinderRadialPointCount);
         var levelCount = Math.Max(1, options.CylinderLevelCount);
-        var levelSpan = Math.Max(cylinder.Radius, 1.0);
         var axisPoint = (cylinder.AxisPointX, cylinder.AxisPointY, cylinder.AxisPointZ);
+        var fullCircle = (cylinder.AngularSpanRad ?? Math.PI * 2) >= Math.PI * 2 - 1e-6;
+        var startAngle = fullCircle ? 0 : cylinder.StartAngleRad ?? 0;
+        var endAngle = fullCircle ? Math.PI * 2 : cylinder.EndAngleRad ?? startAngle;
         var points = new List<MeasurementPoint>();
 
         for (var level = 0; level < levelCount; level++)
         {
-            var offset = levelCount == 1
-                ? 0
-                : -levelSpan / 2 + levelSpan * level / (levelCount - 1);
+            var fraction = levelCount == 1 ? 0.5 : 0.2 + 0.6 * level / (levelCount - 1);
+            var offset = (fraction - 0.5) * cylinder.Length.Value;
             var center = Add(axisPoint, Scale(axis, offset));
 
             for (var i = 0; i < radialCount; i++)
             {
-                var angle = Math.PI * 2 * i / radialCount;
+                var angleFraction = fullCircle ? (double)i / radialCount : (double)i / Math.Max(radialCount - 1, 1);
+                var angle = startAngle + (endAngle - startAngle) * angleFraction;
                 var radial = Normalize(Add(Scale(u, Math.Cos(angle)), Scale(v, Math.Sin(angle))));
                 var point = Add(center, Scale(radial, cylinder.Radius));
-                points.Add(CreatePoint(point.X, point.Y, point.Z, radial.X, radial.Y, radial.Z));
+                var contactNormal = cylinder.IsInnerSurface == true ? Scale(radial, -1) : radial;
+                points.Add(CreatePoint(point.X, point.Y, point.Z, contactNormal.X, contactNormal.Y, contactNormal.Z));
             }
         }
 

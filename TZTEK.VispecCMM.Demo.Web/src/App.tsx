@@ -94,6 +94,8 @@ export default function App() {
       ? result.features
       : result.features.filter(feature => `${feature.name} ${feature.type}`.toLowerCase().includes(value))
   }, [query, result])
+  const measurementFeatures = filteredFeatures.filter(feature => feature.isMeasurementFeature)
+  const rawFeatures = filteredFeatures.filter(feature => !feature.isMeasurementFeature)
 
   useEffect(() => {
     setCurrentStep(0)
@@ -219,20 +221,10 @@ export default function App() {
             <input value={query} onChange={event => setQuery(event.target.value)} placeholder="搜索名称或类型" />
           </label>
           <div className="feature-list">
-            {filteredFeatures.map(feature => (
-              <button
-                key={feature.id}
-                className={`feature-row ${feature.id === selectedFeatureId ? 'selected' : ''}`}
-                onClick={() => setSelectedFeatureId(feature.id)}
-              >
-                <span className={`feature-swatch type-${feature.type.toLowerCase()}`} />
-                <span className="feature-copy">
-                  <strong>{feature.name}</strong>
-                  <small>{feature.type} · {feature.measurementPoints.length} 点</small>
-                </span>
-                <ChevronRight size={14} />
-              </button>
-            ))}
+            {measurementFeatures.length > 0 && <div className="feature-group-label">测量特征</div>}
+            {measurementFeatures.map(feature => <FeatureRow key={feature.id} feature={feature} selected={feature.id === selectedFeatureId} onSelect={setSelectedFeatureId} />)}
+            {rawFeatures.length > 0 && <div className="feature-group-label">原始 CAD 曲面</div>}
+            {rawFeatures.map(feature => <FeatureRow key={feature.id} feature={feature} selected={feature.id === selectedFeatureId} onSelect={setSelectedFeatureId} />)}
             {!result && <EmptyList />}
           </div>
         </aside>
@@ -368,11 +360,30 @@ function FeatureDetails({ feature }: { feature: VisualizationFeature }) {
       <InfoRow label="位置" value={formatVector(feature.position)} />
       <InfoRow label="方向" value={formatVector(feature.direction)} />
       {feature.radius != null && <InfoRow label="半径" value={`${feature.radius.toFixed(3)} mm`} />}
+      {feature.length != null && <InfoRow label="长度" value={`${feature.length.toFixed(3)} mm`} />}
+      {feature.axisStart && <InfoRow label="轴向起点" value={formatVector(feature.axisStart)} />}
+      {feature.axisEnd && <InfoRow label="轴向终点" value={formatVector(feature.axisEnd)} />}
+      {feature.type === 'Cylinder' && <InfoRow label="表面" value={feature.isInnerSurface == null ? '未确定' : feature.isInnerSurface ? '内孔壁' : '外圆柱面'} />}
+      {feature.sourceElementIds.length > 0 && <InfoRow label="来源面" value={feature.sourceElementIds.join(', ')} />}
       {feature.area != null && <InfoRow label="面积" value={`${feature.area.toFixed(2)} mm²`} />}
       <InfoRow label="测点" value={`${feature.measurementPoints.length}`} />
+      {feature.requiresProbeReorientation && <InfoRow label="可达性" value="需转角测头或侧向探针" />}
       <InfoRow label="拟合" value={feature.fittingMethod ?? '—'} />
       <InfoRow label="公差" value={feature.tolerances.length ? feature.tolerances.join(', ') : '无'} />
     </div>
+  )
+}
+
+function FeatureRow({ feature, selected, onSelect }: { feature: VisualizationFeature; selected: boolean; onSelect: (id: string) => void }) {
+  return (
+    <button className={`feature-row ${selected ? 'selected' : ''}`} onClick={() => onSelect(feature.id)}>
+      <span className={`feature-swatch type-${feature.type.toLowerCase()}`} />
+      <span className="feature-copy">
+        <strong>{feature.name}</strong>
+        <small>{feature.type} · {feature.measurementPoints.length} 点</small>
+      </span>
+      <ChevronRight size={14} />
+    </button>
   )
 }
 

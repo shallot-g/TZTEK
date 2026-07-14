@@ -20,6 +20,7 @@ const colors = {
   goto: 0x4d8dff,
   risk: 0xef5b5b,
   feature: 0x50a8d8,
+  innerFeature: 0x42c9b8,
   selected: 0xffffff,
   point: 0xff9638,
 }
@@ -316,16 +317,18 @@ function createPointLabel(text: string) {
 }
 
 function createFeatureObject(feature: VisualizationFeature, selected: boolean): THREE.Object3D | null {
-  const color = selected ? colors.selected : colors.feature
+  const color = selected ? colors.selected : feature.isInnerSurface ? colors.innerFeature : colors.feature
   const material = new THREE.MeshBasicMaterial({ color, wireframe: true, transparent: true, opacity: selected ? 0.95 : 0.5, depthTest: false })
   let object: THREE.Object3D | null = null
   const radius = Math.max(feature.radius ?? 5, 0.5)
   const size = Math.max(Math.sqrt(feature.area ?? 100), 5)
   switch (feature.type) {
     case 'Cylinder': {
-      const height = Math.max((feature.area ?? radius * 20) / Math.max(2 * Math.PI * radius, 1), 8)
-      object = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius, height, 24, 1, true), material)
-      orient(object, new THREE.Vector3(0, 1, 0), feature.direction)
+      const height = Math.max(feature.length ?? 0, 0.01)
+      const thetaStart = feature.startAngleRad ?? 0
+      const thetaLength = Math.min(Math.max(feature.angularSpanRad ?? Math.PI * 2, 0.001), Math.PI * 2)
+      object = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius, height, 48, 1, true, thetaStart, thetaLength), material)
+      orientCylinder(object, feature.direction, feature.radialReference)
       break
     }
     case 'Plane':
@@ -362,4 +365,16 @@ function createFeatureObject(feature: VisualizationFeature, selected: boolean): 
 function orient(object: THREE.Object3D, from: THREE.Vector3, direction: [number, number, number]) {
   const target = new THREE.Vector3(...direction).normalize()
   if (target.lengthSq() > 0) object.quaternion.setFromUnitVectors(from, target)
+}
+
+function orientCylinder(object: THREE.Object3D, direction: [number, number, number], radialReference?: [number, number, number]) {
+  const axis = new THREE.Vector3(...direction).normalize()
+  if (!radialReference) {
+    orient(object, new THREE.Vector3(0, 1, 0), direction)
+    return
+  }
+
+  const radial = new THREE.Vector3(...radialReference).normalize()
+  const tangent = new THREE.Vector3().crossVectors(axis, radial).normalize()
+  object.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(tangent, axis, radial))
 }
