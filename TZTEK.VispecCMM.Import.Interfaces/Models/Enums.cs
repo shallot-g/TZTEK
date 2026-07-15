@@ -136,6 +136,7 @@ public enum FileFormat
 /// <summary>路径优化策略</summary>
 public enum PathOptimizationStrategy
 {
+    ImportOrder,
     NearestNeighbor,
     TwoOpt,
     GeneticAlgorithm,

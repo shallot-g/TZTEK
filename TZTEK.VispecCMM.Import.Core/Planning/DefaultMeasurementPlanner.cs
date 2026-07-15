@@ -7,19 +7,22 @@ internal sealed class DefaultMeasurementPlanner : IMeasurementPlanner
     private readonly IProbeAssigner _probeAssigner;
     private readonly IMeasurementPresetProvider _presetProvider;
     private readonly ISafePathPlanner _safePathPlanner;
+    private readonly IPathOptimizer _pathOptimizer;
 
     public DefaultMeasurementPlanner(
         IFeatureRecognizer featureRecognizer,
         IMeasurementPointPlanner pointPlanner,
         IProbeAssigner probeAssigner,
         IMeasurementPresetProvider presetProvider,
-        ISafePathPlanner safePathPlanner)
+        ISafePathPlanner safePathPlanner,
+        IPathOptimizer pathOptimizer)
     {
         _featureRecognizer = featureRecognizer;
         _pointPlanner = pointPlanner;
         _probeAssigner = probeAssigner;
         _presetProvider = presetProvider;
         _safePathPlanner = safePathPlanner;
+        _pathOptimizer = pathOptimizer;
     }
 
     public IReadOnlyList<MeasurementTask> Plan(
@@ -33,21 +36,45 @@ internal sealed class DefaultMeasurementPlanner : IMeasurementPlanner
 
         ApplyNames(candidates, options.NamingRule ?? NamingRule.CreateDefault());
 
+        var rawPointsByFeatureId = candidates.ToDictionary(
+            item => item.Primitive.Id,
+            item => _pointPlanner.PlanPoints(item.Primitive, options),
+            StringComparer.OrdinalIgnoreCase);
+
+        if (options.PathStrategy != PathOptimizationStrategy.ImportOrder)
+        {
+            candidates = _pathOptimizer
+                .OptimizeFeatureOrderByPointProximity(candidates, rawPointsByFeatureId, options)
+                .ToList();
+        }
+
         var primitives = candidates.Select(item => (IPrimitive)item.Primitive).ToList();
         var assignedProbes = _probeAssigner.Assign(primitives, probes);
         var steps = new List<MeasurementStep>();
         var allPoints = new List<MeasurementPoint>();
+        (double X, double Y, double Z)? pathReference = options.StartPoint;
 
         for (var i = 0; i < candidates.Count; i++)
         {
             var item = candidates[i];
             var primitive = item.Primitive;
             var probe = assignedProbes[Math.Min(i, assignedProbes.Count - 1)];
-            var points = _pointPlanner.PlanPoints(primitive, options);
+            var estimateReference = pathReference;
+            var points = _pathOptimizer.OptimizePointOrder(
+                rawPointsByFeatureId[primitive.Id],
+                pathReference,
+                options);
 
             primitive.AssignedProbeId = probe.Id;
             allPoints.AddRange(points);
 
+            if (points.Count > 0)
+            {
+                var lastPoint = points[^1];
+                pathReference = (lastPoint.X, lastPoint.Y, lastPoint.Z);
+            }
+
+            var pointPathLength = EstimatePointPathLength(points, estimateReference);
             steps.Add(new MeasurementStep
             {
                 SequenceNumber = steps.Count + 1,
@@ -57,8 +84,8 @@ internal sealed class DefaultMeasurementPlanner : IMeasurementPlanner
                 ProbeAssignment = probe,
                 MeasurementPoints = points,
                 FittingMethod = DefaultMeasurementTaskAssembler.SelectFittingMethod(primitive),
-                TravelDistanceMm = EstimatePointPathLength(points),
-                EstimatedTimeSeconds = EstimatePointPathLength(points) / 20.0
+                TravelDistanceMm = pointPathLength,
+                EstimatedTimeSeconds = pointPathLength / 20.0
             });
         }
 
@@ -164,11 +191,23 @@ internal sealed class DefaultMeasurementPlanner : IMeasurementPlanner
         return length;
     }
 
-    private static double EstimatePointPathLength(IReadOnlyList<MeasurementPoint> points)
+    private static double EstimatePointPathLength(
+        IReadOnlyList<MeasurementPoint> points,
+        (double X, double Y, double Z)? startPoint = null)
     {
+        if (points.Count == 0)
+            return 0;
+
         var length = 0.0;
-        for (var i = 1; i < points.Count; i++)
-            length += Distance((points[i - 1].X, points[i - 1].Y, points[i - 1].Z), (points[i].X, points[i].Y, points[i].Z));
+        (double X, double Y, double Z)? previous = startPoint;
+        foreach (var point in points)
+        {
+            var current = (point.X, point.Y, point.Z);
+            if (previous is not null)
+                length += Distance(previous.Value, current);
+            previous = current;
+        }
+
         return length;
     }
 

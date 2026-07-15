@@ -17,14 +17,15 @@ internal sealed class DefaultSafePathPlanner : ISafePathPlanner
         var expandedSteps = new List<MeasurementStep>();
         (double X, double Y, double Z)? previous = options.StartPoint;
 
-        foreach (var step in task.Steps)
+        var measurementSteps = task.Steps
+            .Where(step => step.StepType == MeasurementStepType.Measurement && step.MeasurementPoints is { Count: > 0 })
+            .ToList();
+
+        for (var featureIndex = 0; featureIndex < measurementSteps.Count; featureIndex++)
         {
-            var points = step.MeasurementPoints ?? [];
-            if (step.StepType != MeasurementStepType.Measurement || points.Count == 0)
-            {
-                expandedSteps.Add(CloneStep(step, expandedSteps.Count + 1));
-                continue;
-            }
+            var step = measurementSteps[featureIndex];
+            var isFirstFeature = featureIndex == 0;
+            var points = step.MeasurementPoints!;
 
             if (options.EnableContinuousCylinderPath
                 && step.TargetItem?.Primitive is CylinderPrimitive)
@@ -38,7 +39,8 @@ internal sealed class DefaultSafePathPlanner : ISafePathPlanner
                     options,
                     task.GlobalSafetyPlane,
                     invertApproach: false,
-                    "cylinder");
+                    "cylinder",
+                    isFirstFeature);
                 continue;
             }
 
@@ -53,14 +55,39 @@ internal sealed class DefaultSafePathPlanner : ISafePathPlanner
                     options,
                     task.GlobalSafetyPlane,
                     invertApproach: false,
-                    ResolveFeaturePathName(step));
+                    ResolveFeaturePathName(step),
+                    isFirstFeature);
                 continue;
             }
 
             if (options.EnableSinglePointSafetyPath)
-                AddSinglePointSafetyPath(expandedSteps, ref previous, step, points, safeZ, options, task.GlobalSafetyPlane);
-            else
-                expandedSteps.Add(CloneStep(step, expandedSteps.Count + 1));
+            {
+                AddSinglePointSafetyPath(
+                    expandedSteps,
+                    ref previous,
+                    step,
+                    points,
+                    safeZ,
+                    options,
+                    task.GlobalSafetyPlane,
+                    isFirstFeature);
+                continue;
+            }
+
+            expandedSteps.Add(CloneStep(step, expandedSteps.Count + 1));
+        }
+
+        if (measurementSteps.Count > 0 && previous is not null)
+        {
+            var lastStep = measurementSteps[^1];
+            var finalSafeAbove = (previous.Value.X, previous.Value.Y, safeZ);
+            AddMovement(
+                expandedSteps,
+                ref previous,
+                lastStep,
+                finalSafeAbove,
+                "Return to global safety plane",
+                task.GlobalSafetyPlane);
         }
 
         var totalLength = expandedSteps.Sum(step => step.TravelDistanceMm ?? 0);
@@ -92,10 +119,12 @@ internal sealed class DefaultSafePathPlanner : ISafePathPlanner
         IReadOnlyList<MeasurementPoint> points,
         double safeZ,
         MeasurementPlanOptions options,
-        ISafetyPlane? safetyPlane)
+        ISafetyPlane? safetyPlane,
+        bool isFirstFeature)
     {
-        foreach (var point in points)
+        for (var index = 0; index < points.Count; index++)
         {
+            var point = points[index];
             var normal = ResolveApproachNormal(point, invert: false);
             var approachDistance = PositiveOrDefault(point.ApproachDistance, options.DefaultApproachDistanceMm);
             var retractDistance = PositiveOrDefault(point.RetractDistance, options.DefaultRetractDistanceMm);
@@ -105,11 +134,15 @@ internal sealed class DefaultSafePathPlanner : ISafePathPlanner
             var approach = OffsetAlongNormal(measure, normal, approachDistance);
             var retract = OffsetAlongNormal(measure, normal, retractDistance);
 
-            AddMovement(steps, ref previous, sourceStep, safeAbove, "Move to safety plane", safetyPlane);
-            AddMovement(steps, ref previous, sourceStep, approach, "Move to approach point", safetyPlane);
+            if (isFirstFeature && index == 0)
+                AddMovement(steps, ref previous, sourceStep, safeAbove, "Move to safety plane", safetyPlane);
+
+            var approachName = !isFirstFeature && index == 0
+                ? $"Move to {ResolveFeaturePathName(sourceStep)} entry approach point"
+                : "Move to approach point";
+            AddMovement(steps, ref previous, sourceStep, approach, approachName, safetyPlane);
             AddMeasurement(steps, ref previous, sourceStep, point);
             AddMovement(steps, ref previous, sourceStep, retract, "Retract from measurement point", safetyPlane);
-            AddMovement(steps, ref previous, sourceStep, safeAbove, "Return to safety plane", safetyPlane);
         }
     }
 
@@ -122,7 +155,8 @@ internal sealed class DefaultSafePathPlanner : ISafePathPlanner
         MeasurementPlanOptions options,
         ISafetyPlane? safetyPlane,
         bool invertApproach,
-        string featureName)
+        string featureName,
+        bool isFirstFeature)
     {
         var firstPoint = points[0];
         var firstMeasure = (firstPoint.X, firstPoint.Y, firstPoint.Z);
@@ -131,8 +165,13 @@ internal sealed class DefaultSafePathPlanner : ISafePathPlanner
         var firstSafeAbove = (firstPoint.X, firstPoint.Y, safeZ);
         var firstApproach = OffsetAlongNormal(firstMeasure, firstNormal, firstApproachDistance);
 
-        AddMovement(steps, ref previous, sourceStep, firstSafeAbove, $"Move to {featureName} safety plane", safetyPlane);
-        AddMovement(steps, ref previous, sourceStep, firstApproach, $"Enter {featureName} measurement path", safetyPlane);
+        if (isFirstFeature)
+            AddMovement(steps, ref previous, sourceStep, firstSafeAbove, $"Move to {featureName} safety plane", safetyPlane);
+
+        var entryName = isFirstFeature
+            ? $"Enter {featureName} measurement path"
+            : $"Move to {featureName} entry approach point";
+        AddMovement(steps, ref previous, sourceStep, firstApproach, entryName, safetyPlane);
 
         foreach (var point in points)
         {
@@ -150,10 +189,8 @@ internal sealed class DefaultSafePathPlanner : ISafePathPlanner
         var retractDistance = PositiveOrDefault(lastPoint.RetractDistance, options.DefaultRetractDistanceMm);
         var lastMeasure = (lastPoint.X, lastPoint.Y, lastPoint.Z);
         var retract = OffsetAlongNormal(lastMeasure, lastNormal, retractDistance);
-        var safeAbove = (lastPoint.X, lastPoint.Y, safeZ);
 
         AddMovement(steps, ref previous, sourceStep, retract, $"Exit {featureName} measurement path", safetyPlane);
-        AddMovement(steps, ref previous, sourceStep, safeAbove, $"Return {featureName} to safety plane", safetyPlane);
     }
 
     private static void AddMeasurement(
