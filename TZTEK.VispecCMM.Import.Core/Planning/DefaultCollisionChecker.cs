@@ -11,7 +11,8 @@ internal sealed class DefaultCollisionChecker : ICollisionChecker
         int segmentIndex)
     {
         var boxes = BuildCollisionBoxes(task, movementStep, options).ToList();
-        if (TryCheckMeasurableSolidTransit(task, movementStep, start, end, options, segmentIndex, out var solidTransit))
+        if (TryCheckMeasurableSolidTransit(task, movementStep, start, end, options, segmentIndex, out var solidTransit)
+            && solidTransit.HasCollision)
             return solidTransit;
         if (IsAboveGlobalSafeHeight(task, start, end, options))
         {
@@ -82,6 +83,9 @@ internal sealed class DefaultCollisionChecker : ICollisionChecker
 
     private static bool ShouldExcludePrimitive(Primitive? target, Primitive candidate, MeasurementStep movementStep)
     {
+        if (IsApproachToApproachTransit(movementStep))
+            return false;
+
         if (target is null)
             return false;
 
@@ -265,10 +269,16 @@ internal sealed class DefaultCollisionChecker : ICollisionChecker
         return new CollisionBox(primitive.Id, primitive, margin, x - radius, y - radius, z - radius, x + radius, y + radius, z + radius);
     }
 
-    private static bool IsIntraFeatureSolidTransit(MeasurementStep step)
+    private static bool IsApproachToApproachTransit(MeasurementStep step)
     {
-        return step.Name.Contains("next", StringComparison.OrdinalIgnoreCase)
-            && step.Name.Contains("approach point", StringComparison.OrdinalIgnoreCase);
+        var name = step.Name;
+        if (name.Contains("Return to approach point", StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        return name.Contains("entry approach point", StringComparison.OrdinalIgnoreCase)
+            || (name.Contains("next", StringComparison.OrdinalIgnoreCase)
+                && name.Contains("approach point", StringComparison.OrdinalIgnoreCase))
+            || name.Contains("Move to approach point", StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool IsInterFeatureEntryTransit(MeasurementStep step)
@@ -278,7 +288,7 @@ internal sealed class DefaultCollisionChecker : ICollisionChecker
 
     private static bool ShouldIncludeTargetAsTransitObstacle(MeasurementStep step)
     {
-        return IsIntraFeatureSolidTransit(step) || IsInterFeatureEntryTransit(step);
+        return IsApproachToApproachTransit(step);
     }
 
     private static bool TryCheckMeasurableSolidTransit(
@@ -291,7 +301,7 @@ internal sealed class DefaultCollisionChecker : ICollisionChecker
         out CollisionResult result)
     {
         result = new CollisionResult { HasCollision = false, TotalSegmentsChecked = 1 };
-        if (!IsIntraFeatureSolidTransit(movementStep) && !IsInterFeatureEntryTransit(movementStep))
+        if (!IsApproachToApproachTransit(movementStep))
             return false;
 
         var margin = ResolveProbeRadius(movementStep) + Math.Max(0, options.CollisionSafetyMarginMm);
@@ -318,13 +328,13 @@ internal sealed class DefaultCollisionChecker : ICollisionChecker
                     Z = (start.Z + end.Z) / 2,
                     Reason = IsInterFeatureEntryTransit(movementStep)
                         ? "Inter-feature transit passes through measurable solid"
-                        : "Straight transit passes through measurable solid; retract via safety plane required"
+                        : "Approach-point transit passes through a measurable face"
                 }
             });
         }
 
         if (collisions.Count == 0)
-            return true;
+            return false;
 
         result = new CollisionResult
         {
@@ -339,34 +349,24 @@ internal sealed class DefaultCollisionChecker : ICollisionChecker
         MeasurementTask task,
         MeasurementStep movementStep)
     {
-        var targetId = movementStep.TargetItem?.Primitive.Id;
         var primitives = task.Steps
             .Select(step => step.TargetItem?.Primitive)
             .OfType<Primitive>()
             .DistinctBy(primitive => primitive.Id)
             .ToList();
 
-        if (IsIntraFeatureSolidTransit(movementStep))
-        {
-            var target = movementStep.TargetItem?.Primitive;
-            if (target is not null)
-                yield return target;
+        if (!IsApproachToApproachTransit(movementStep))
             yield break;
-        }
 
         foreach (var primitive in primitives)
         {
-            switch (primitive)
-            {
-                case CylinderPrimitive:
-                    yield return primitive;
-                    break;
-                case PlanePrimitive when !string.Equals(primitive.Id, targetId, StringComparison.OrdinalIgnoreCase):
-                    yield return primitive;
-                    break;
-            }
+            if (SupportsSolidTransitCheck(primitive))
+                yield return primitive;
         }
     }
+
+    private static bool SupportsSolidTransitCheck(Primitive primitive) =>
+        primitive is PlanePrimitive or CylinderPrimitive or ConePrimitive or SpherePrimitive or Surface3DPrimitive;
 
     private static bool SegmentPassesThroughPrimitiveSolid(
         Primitive primitive,
@@ -378,8 +378,87 @@ internal sealed class DefaultCollisionChecker : ICollisionChecker
         {
             CylinderPrimitive cylinder => SegmentPassesThroughCylinderSolid(cylinder, start, end, margin),
             PlanePrimitive plane => SegmentPassesThroughPlaneSolid(plane, start, end, margin),
+            ConePrimitive cone => SegmentPassesThroughConeSolid(cone, start, end, margin),
+            SpherePrimitive sphere => SegmentPassesThroughSphereSolid(sphere, start, end, margin),
+            Surface3DPrimitive surface => SegmentPassesThroughSurfaceSolid(surface, start, end, margin),
             _ => false
         };
+    }
+
+    private static bool SegmentPassesThroughSphereSolid(
+        SpherePrimitive sphere,
+        (double X, double Y, double Z) start,
+        (double X, double Y, double Z) end,
+        double margin)
+    {
+        var center = (sphere.CenterX, sphere.CenterY, sphere.CenterZ);
+        var radius = sphere.Radius + margin;
+
+        const int samples = 24;
+        const double endpointBand = 0.04;
+        for (var i = 1; i < samples; i++)
+        {
+            var t = (double)i / samples;
+            if (t < endpointBand || t > 1 - endpointBand)
+                continue;
+
+            if (Length(Subtract(Lerp(start, end, t), center)) <= radius)
+                return true;
+        }
+
+        return false;
+    }
+
+    private static bool SegmentPassesThroughConeSolid(
+        ConePrimitive cone,
+        (double X, double Y, double Z) start,
+        (double X, double Y, double Z) end,
+        double margin)
+    {
+        var axis = Normalize((cone.AxisDirX, cone.AxisDirY, cone.AxisDirZ));
+        var apex = (cone.ApexX, cone.ApexY, cone.ApexZ);
+        var tanAngle = Math.Tan(Math.Max(1e-6, cone.HalfAngleRad));
+        var maxHeight = Math.Max(50.0, Math.Sqrt(cone.SourceAreaMm2 ?? 2500.0));
+
+        const int samples = 24;
+        const double endpointBand = 0.04;
+        for (var i = 1; i < samples; i++)
+        {
+            var t = (double)i / samples;
+            if (t < endpointBand || t > 1 - endpointBand)
+                continue;
+
+            var point = Lerp(start, end, t);
+            var delta = Subtract(point, apex);
+            var axial = Dot(delta, axis);
+            if (axial < -margin || axial > maxHeight + margin)
+                continue;
+
+            var envelopeRadius = axial * tanAngle + margin;
+            if (Length(Cross(delta, axis)) <= envelopeRadius)
+                return true;
+        }
+
+        return false;
+    }
+
+    private static bool SegmentPassesThroughSurfaceSolid(
+        Surface3DPrimitive surface,
+        (double X, double Y, double Z) start,
+        (double X, double Y, double Z) end,
+        double margin)
+    {
+        if (surface.Vertices.Count == 0)
+            return false;
+
+        var minX = surface.Vertices.Min(vertex => vertex.X) - margin;
+        var minY = surface.Vertices.Min(vertex => vertex.Y) - margin;
+        var minZ = surface.Vertices.Min(vertex => vertex.Z) - margin;
+        var maxX = surface.Vertices.Max(vertex => vertex.X) + margin;
+        var maxY = surface.Vertices.Max(vertex => vertex.Y) + margin;
+        var maxZ = surface.Vertices.Max(vertex => vertex.Z) + margin;
+        var box = new CollisionBox(surface.Id, surface, margin, minX, minY, minZ, maxX, maxY, maxZ);
+        return IntersectsSegment(box, start, end);
     }
 
     private static bool SegmentPassesThroughPlaneSolid(

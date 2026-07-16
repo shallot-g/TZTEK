@@ -151,23 +151,20 @@ internal static class VisualizationMapper
             if (step.StepType == MeasurementStepType.Movement && step.GotoTarget is not null)
             {
                 var end = (step.GotoTarget.X, step.GotoTarget.Y, step.GotoTarget.Z);
-                var isNextApproach = step.Name.Contains("next", StringComparison.OrdinalIgnoreCase)
-                    && step.Name.Contains("approach point", StringComparison.OrdinalIgnoreCase);
-                var start = isNextApproach && previousApproach is not null
+                var isApproachTransit = IsApproachToApproachTransit(step);
+                var start = isApproachTransit && previousApproach is not null
                     ? previousApproach.Value
                     : previous;
 
                 if (start is not null)
                     result.Add(MapSegment(step, start.Value, end, "Movement"));
 
-                if (isNextApproach)
+                if (step.Name.Contains("Return to approach point", StringComparison.OrdinalIgnoreCase))
+                    previousApproach = end;
+                else if (isApproachTransit)
                     previousApproach = end;
                 else if (step.Name.Contains("Enter", StringComparison.OrdinalIgnoreCase)
                     && step.Name.Contains("measurement path", StringComparison.OrdinalIgnoreCase))
-                    previousApproach = end;
-                else if (step.Name.Contains("entry approach point", StringComparison.OrdinalIgnoreCase))
-                    previousApproach = end;
-                else if (step.Name.Contains("Move to approach point", StringComparison.OrdinalIgnoreCase))
                     previousApproach = end;
                 else if (!step.Name.Contains("measurement path", StringComparison.OrdinalIgnoreCase))
                     previousApproach = null;
@@ -188,6 +185,18 @@ internal static class VisualizationMapper
         for (var i = 0; i < result.Count; i++)
             result[i] = result[i] with { Sequence = i + 1 };
         return result;
+    }
+
+    private static bool IsApproachToApproachTransit(MeasurementStep step)
+    {
+        var name = step.Name;
+        if (name.Contains("Return to approach point", StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        return name.Contains("entry approach point", StringComparison.OrdinalIgnoreCase)
+            || (name.Contains("next", StringComparison.OrdinalIgnoreCase)
+                && name.Contains("approach point", StringComparison.OrdinalIgnoreCase))
+            || name.Contains("Move to approach point", StringComparison.OrdinalIgnoreCase);
     }
 
     private static VisualizationPathSegmentDto MapSegment(

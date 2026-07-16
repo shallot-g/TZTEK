@@ -30,9 +30,8 @@ internal sealed class DefaultPathCollisionResolver : IPathCollisionResolver
             }
 
             var target = ToPoint(step.GotoTarget);
-            var isNextApproach = step.Name.Contains("next", StringComparison.OrdinalIgnoreCase)
-                && step.Name.Contains("approach point", StringComparison.OrdinalIgnoreCase);
-            var collisionStart = isNextApproach && previousApproach is not null
+            var isApproachTransit = IsApproachToApproachTransit(step);
+            var collisionStart = isApproachTransit && previousApproach is not null
                 ? previousApproach.Value
                 : previous;
 
@@ -192,6 +191,12 @@ internal sealed class DefaultPathCollisionResolver : IPathCollisionResolver
         ref (double X, double Y, double Z)? previousApproach)
     {
         var name = step.Name;
+        if (name.Contains("Return to approach point", StringComparison.OrdinalIgnoreCase))
+        {
+            previousApproach = target;
+            return;
+        }
+
         if (name.Contains("next", StringComparison.OrdinalIgnoreCase)
             && name.Contains("approach point", StringComparison.OrdinalIgnoreCase))
         {
@@ -222,20 +227,26 @@ internal sealed class DefaultPathCollisionResolver : IPathCollisionResolver
             previousApproach = null;
     }
 
+    private static bool IsApproachToApproachTransit(MeasurementStep step)
+    {
+        var name = step.Name;
+        if (name.Contains("Return to approach point", StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        return name.Contains("entry approach point", StringComparison.OrdinalIgnoreCase)
+            || (name.Contains("next", StringComparison.OrdinalIgnoreCase)
+                && name.Contains("approach point", StringComparison.OrdinalIgnoreCase))
+            || name.Contains("Move to approach point", StringComparison.OrdinalIgnoreCase);
+    }
+
     private static bool IsInterFeatureTransition(MeasurementStep step)
     {
         return step.Name.Contains("entry approach point", StringComparison.OrdinalIgnoreCase);
     }
 
-    private static bool IsIntraFeatureApproachTransit(MeasurementStep step)
-    {
-        return step.Name.Contains("next", StringComparison.OrdinalIgnoreCase)
-            && step.Name.Contains("approach point", StringComparison.OrdinalIgnoreCase);
-    }
-
     private static bool ShouldTryAutoGoto(MeasurementStep step)
     {
-        return IsInterFeatureTransition(step) || IsIntraFeatureApproachTransit(step);
+        return IsApproachToApproachTransit(step);
     }
 
     private static bool ShouldSkipCollisionCheck(MeasurementStep step)
@@ -269,10 +280,7 @@ internal sealed class DefaultPathCollisionResolver : IPathCollisionResolver
             return true;
         }
 
-        if (name.Contains("Move to approach point", StringComparison.OrdinalIgnoreCase))
-            return true;
-
-        if (name.Contains("Retract from measurement point", StringComparison.OrdinalIgnoreCase))
+        if (name.Contains("Return to approach point", StringComparison.OrdinalIgnoreCase))
             return true;
 
         return false;
@@ -512,8 +520,7 @@ internal sealed class DefaultPathCollisionResolver : IPathCollisionResolver
     {
         var cloned = CloneStep(sourceStep, steps.Count + 1);
         cloned.Name = $"{sourceStep.Name} - Needs manual GOTO point";
-        var isSolidTransit = sourceStep.Name.Contains("next", StringComparison.OrdinalIgnoreCase)
-            && sourceStep.Name.Contains("approach point", StringComparison.OrdinalIgnoreCase);
+        var isApproachTransit = IsApproachToApproachTransit(sourceStep);
         var isInterFeature = sourceStep.Name.Contains("entry approach point", StringComparison.OrdinalIgnoreCase);
         cloned.GotoTarget = new GotoPoint
         {
@@ -523,8 +530,8 @@ internal sealed class DefaultPathCollisionResolver : IPathCollisionResolver
             Z = target.Z,
             Reason = isInterFeature
                 ? "Inter-feature transit has collision risk; needs manual GOTO point"
-                : isSolidTransit
-                    ? "Intra-feature approach transit has collision risk; needs manual GOTO point"
+                : isApproachTransit
+                    ? "Approach-point transit has collision risk; needs manual GOTO point"
                     : "Anchor transition has collision risk; needs manual GOTO point"
         };
         cloned.TravelDistanceMm = previous is null ? 0 : Distance(previous.Value, target);
@@ -541,8 +548,7 @@ internal sealed class DefaultPathCollisionResolver : IPathCollisionResolver
     {
         var cloned = CloneStep(sourceStep, steps.Count + 1);
         cloned.Name = $"{sourceStep.Name} - Collision risk accepted";
-        var isSolidTransit = sourceStep.Name.Contains("next", StringComparison.OrdinalIgnoreCase)
-            && sourceStep.Name.Contains("approach point", StringComparison.OrdinalIgnoreCase);
+        var isApproachTransit = IsApproachToApproachTransit(sourceStep);
         var isInterFeature = sourceStep.Name.Contains("entry approach point", StringComparison.OrdinalIgnoreCase);
         cloned.GotoTarget = new GotoPoint
         {
@@ -552,8 +558,8 @@ internal sealed class DefaultPathCollisionResolver : IPathCollisionResolver
             Z = target.Z,
             Reason = isInterFeature
                 ? "Inter-feature transit has collision risk; direct connection kept without safety plane detour"
-                : isSolidTransit
-                    ? "Straight transit passes through measurable solid; collision risk accepted"
+                : isApproachTransit
+                    ? "Approach-point transit passes through a measurable face; collision risk accepted"
                     : "Collision risk accepted without user GOTO point"
         };
         cloned.TravelDistanceMm = previous is null ? 0 : Distance(previous.Value, target);

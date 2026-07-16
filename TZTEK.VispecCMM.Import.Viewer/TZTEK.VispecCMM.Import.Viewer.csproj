@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>TZTEK.VispecCMM.Import.Viewer</RootNamespace>
+    <AssemblyName>TZTEK.VispecCMM.Import.Viewer</AssemblyName>
+    <Description>Vispec CMM 测量场景构建与导出</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\TZTEK.VispecCMM.Import.Interfaces\TZTEK.VispecCMM.Import.Interfaces.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="8.0.2" />
+  </ItemGroup>
+
+</Project>
