@@ -157,6 +157,13 @@ def parse_step(path: Path) -> dict[str, Any]:
             surface_type = safe_face_geom_type(face)
             center = cq_vector_to_list(face.Center())
             area = safe_float(lambda: face.Area(), 0.0)
+
+            # Skip faces whose area is below the minimum measurable threshold —
+            # these are typically construction artifacts, sliver faces at
+            # feature boundaries, or faces that are too small for the probe.
+            if area < 1.0:
+                continue
+
             geometry = step_face_geometry(
                 face, surface_type, center, area, BRepAdaptor_Surface, TopAbs_FORWARD, TopAbs_REVERSED
             )
@@ -183,7 +190,13 @@ def parse_step(path: Path) -> dict[str, Any]:
 
             primitive = primitive_from_step_face(element_id, surface_type, geometry)
             if primitive:
+                primitive["solidIndex"] = solid_index
                 primitives.append(primitive)
+
+    # In multi-solid assemblies, faces at the interface between two solids
+    # are internal / non-exposed — the probe cannot reach them.
+    if len(solids) > 1:
+        primitives = _remove_mating_faces(primitives)
 
     return {
         "sourceType": "Model3D",
@@ -471,6 +484,60 @@ def midpoint(start: list[float], end: list[float]) -> list[float]:
 
 def distance(start: list[float], end: list[float]) -> float:
     return math.sqrt(sum((end[index] - start[index]) ** 2 for index in range(3)))
+
+
+def _remove_mating_faces(
+    primitives: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Remove planar faces that are mating (internal) surfaces between solids.
+
+    In a STEP assembly, touching solids share mating faces that are not
+    exposed to the outside — a CMM probe cannot access them.  We detect such
+    pairs by checking whether two planes from different solids are co-planar,
+    have opposite normals, and overlap spatially.
+    """
+    planes = [p for p in primitives if p.get("type") == "Plane"]
+    if len(planes) < 2:
+        return primitives
+
+    plane_data: list[tuple[int, list[float], list[float], int]] = []
+    for idx, p in enumerate(planes):
+        n = p.get("normal")
+        pt = p.get("point")
+        si = p.get("solidIndex", 0)
+        if n is None or pt is None:
+            continue
+        nn = math.sqrt(n[0]**2 + n[1]**2 + n[2]**2) or 1.0
+        n = [n[0]/nn, n[1]/nn, n[2]/nn]
+        plane_data.append((idx, n, pt, si))
+
+    mating_ids: set[str] = set()
+    _EPS_NORMAL = 0.9999
+    _EPS_DIST = 0.05
+
+    for i in range(len(plane_data)):
+        for j in range(i + 1, len(plane_data)):
+            idx_i, ni, pti, si_i = plane_data[i]
+            idx_j, nj, ptj, si_j = plane_data[j]
+
+            if si_i == si_j:
+                continue
+
+            dot = ni[0]*nj[0] + ni[1]*nj[1] + ni[2]*nj[2]
+            if dot > -_EPS_NORMAL:
+                continue
+
+            d = abs(ni[0]*(ptj[0]-pti[0]) + ni[1]*(ptj[1]-pti[1]) + ni[2]*(ptj[2]-pti[2]))
+            if d > _EPS_DIST:
+                continue
+
+            mating_ids.add(planes[idx_i]["id"])
+            mating_ids.add(planes[idx_j]["id"])
+
+    if not mating_ids:
+        return primitives
+
+    return [p for p in primitives if p.get("id") not in mating_ids]
 
 
 def cq_vector_to_list(value: Any) -> list[float]:
