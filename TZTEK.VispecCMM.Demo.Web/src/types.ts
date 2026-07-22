@@ -47,6 +47,12 @@ export interface VisualizationFeature {
   requiresProbeReorientation: boolean
   area?: number
   angleRad?: number
+  coneLength?: number
+  coneAxisStart?: Vec3
+  coneAxisEnd?: Vec3
+  coneRefRadius?: number
+  coneRadiusStart?: number
+  coneRadiusEnd?: number
   surfaceType?: string
   fittingMethod?: string
   tolerances: string[]

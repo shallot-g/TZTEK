@@ -339,8 +339,11 @@ function createFeatureObject(feature: VisualizationFeature, selected: boolean): 
       object = new THREE.Mesh(new THREE.SphereGeometry(radius, 20, 14), material)
       break
     case 'Cone': {
-      const height = Math.max(size, 8)
-      object = new THREE.Mesh(new THREE.ConeGeometry(Math.tan(feature.angleRad ?? 0.35) * height, height, 24, 1, true), material)
+      const coneHeight = Math.max(feature.coneLength ?? size, 0.5)
+      const rStart = Math.max(feature.coneRadiusStart ?? Math.tan(feature.angleRad ?? 0.35) * coneHeight, 0.25)
+      const rEnd = Math.max(feature.coneRadiusEnd ?? rStart, 0.25)
+      // Use CylinderGeometry for frustum (圆台) — different top/bottom radii
+      object = new THREE.Mesh(new THREE.CylinderGeometry(rStart, rEnd, coneHeight, 24, 1, true), material)
       orient(object, new THREE.Vector3(0, 1, 0), feature.direction)
       break
     }

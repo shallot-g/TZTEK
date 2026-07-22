@@ -267,11 +267,60 @@ def step_face_geometry(
     if surface_type == "CONE":
         cone = adaptor.Cone()
         axis = cone.Axis()
-        geometry["apex"] = ocp_point_to_list(cone.Apex())
-        geometry["axisPoint"] = ocp_point_to_list(axis.Location())
-        geometry["axisDirection"] = ocp_direction_to_list(axis.Direction())
-        geometry["halfAngleRad"] = float(cone.SemiAngle())
-        geometry["refRadius"] = float(cone.RefRadius())
+        apex = ocp_point_to_list(cone.Apex())
+        axis_point = ocp_point_to_list(axis.Location())
+        axis_direction = ocp_direction_to_list(axis.Direction())
+        half_angle = float(cone.SemiAngle())
+        ref_radius = float(cone.RefRadius())
+
+        v_min = float(adaptor.FirstVParameter())
+        v_max = float(adaptor.LastVParameter())
+        u_min = float(adaptor.FirstUParameter())
+        u_max = float(adaptor.LastUParameter())
+        # OpenCASCADE cone parameterisation:
+        #   P(U,V) = Location
+        #          + (RefRadius + V·sin(Ang))·(cos(U)·XDir + sin(U)·YDir)
+        #          + V·cos(Ang)·ZDir
+        # V is the distance along the *generatrix* (surface line), NOT along
+        # the axis.  The axial distance corresponding to V is V·cos(Ang).
+        # The apex is at V = -RefRadius / sin(Ang), i.e. 0 when RefRadius=0.
+        cos_ang = math.cos(half_angle)
+        sin_ang = math.sin(half_angle)
+
+        # Trim-bound axis positions: centre of the circular cross-section at V.
+        # V is along the generatrix; v_min < v_max always, so the smaller-V end
+        # has the smaller radius (closer to the apex).
+        v_small_end = add_scaled(axis_point, axis_direction, v_min * cos_ang)
+        v_large_end = add_scaled(axis_point, axis_direction, v_max * cos_ang)
+        r_small = ref_radius + v_min * sin_ang
+        r_large = ref_radius + v_max * sin_ang
+
+        # CMM convention: measurement proceeds from the larger face (base /
+        # 下面) toward the smaller face (tip / 上面).  Therefore axisStart
+        # holds the larger-radius end and axisEnd the smaller-radius end.
+        axis_start = v_large_end   # larger radius → 下面 (base)
+        axis_end   = v_small_end   # smaller radius → 上面 (tip)
+        r_start    = r_large
+        r_end      = r_small
+
+        axis_center = midpoint(axis_start, axis_end)
+        face_length = distance(axis_start, axis_end)
+
+        geometry["apex"] = apex
+        geometry["axisPoint"] = axis_point
+        geometry["axisDirection"] = axis_direction
+        geometry["halfAngleRad"] = half_angle
+        geometry["refRadius"] = ref_radius
+        geometry["axisStart"] = axis_start
+        geometry["axisEnd"] = axis_end
+        geometry["axisCenter"] = axis_center
+        geometry["length"] = face_length
+        # Radii at the face trim boundaries: r(V) = RefRadius + V·sin(Ang)
+        geometry["radiusStart"] = r_start
+        geometry["radiusEnd"]   = r_end
+        geometry["uMin"] = u_min
+        geometry["uMax"] = u_max
+        geometry["angularSpanRad"] = max(0.0, u_max - u_min)
         return geometry
 
     if surface_type == "SPHERE":
@@ -279,6 +328,31 @@ def step_face_geometry(
         geometry["center"] = ocp_point_to_list(sphere.Location())
         geometry["radius"] = float(sphere.Radius())
         return geometry
+
+    # For freeform surfaces, sample a grid of 3-D points so that
+    # Surface3D primitives have enough geometry for measurement.
+    sample_count = 5
+    pts = []
+    try:
+        from OCP.gp import gp_Pnt
+        u_min = float(adaptor.FirstUParameter())
+        u_max = float(adaptor.LastUParameter())
+        v_min = float(adaptor.FirstVParameter())
+        v_max = float(adaptor.LastVParameter())
+        for ui in range(sample_count):
+            u = u_min + (u_max - u_min) * ui / max(sample_count - 1, 1)
+            for vi in range(sample_count):
+                v = v_min + (v_max - v_min) * vi / max(sample_count - 1, 1)
+                try:
+                    pt = gp_Pnt()
+                    adaptor.D0(u, v, pt)
+                    pts.append([pt.X(), pt.Y(), pt.Z()])
+                except Exception:
+                    pass
+    except Exception:
+        pass
+    if pts:
+        geometry["samplePoints"] = pts
 
     return geometry
 
@@ -324,6 +398,16 @@ def primitive_from_step_face(element_id: str, surface_type: str, geometry: dict[
             "apex": geometry.get("apex") or geometry.get("axisPoint"),
             "axisDirection": geometry.get("axisDirection"),
             "halfAngleRad": geometry.get("halfAngleRad"),
+            "axisStart": geometry.get("axisStart"),
+            "axisEnd": geometry.get("axisEnd"),
+            "axisCenter": geometry.get("axisCenter"),
+            "length": geometry.get("length"),
+            "radiusStart": geometry.get("radiusStart"),
+            "radiusEnd": geometry.get("radiusEnd"),
+            "startAngleRad": geometry.get("uMin"),
+            "endAngleRad": geometry.get("uMax"),
+            "angularSpanRad": geometry.get("angularSpanRad"),
+            "refRadius": geometry.get("refRadius"),
             "area": geometry.get("area"),
         }
 
@@ -344,7 +428,7 @@ def primitive_from_step_face(element_id: str, surface_type: str, geometry: dict[
             "type": "Surface3D",
             "sourceElementId": element_id,
             "surfaceType": surface_type,
-            "vertices": [center],
+            "vertices": geometry.get("samplePoints", [center]),
             "triangles": [],
             "area": geometry.get("area"),
         }

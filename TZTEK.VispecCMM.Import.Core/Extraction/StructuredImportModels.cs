@@ -39,6 +39,9 @@ internal sealed class StructuredPrimitiveDto
     public double? StartAngleRad { get; set; }
     public double? EndAngleRad { get; set; }
     public double? HalfAngleRad { get; set; }
+    public double? RefRadius { get; set; }
+    public double? RadiusStart { get; set; }
+    public double? RadiusEnd { get; set; }
     public List<double[]> Points { get; set; } = [];
     public bool? IsClosed { get; set; }
     public int? Degree { get; set; }

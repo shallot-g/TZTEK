@@ -96,6 +96,16 @@ internal static class VisualizationMapper
             RequiresProbeReorientation = isMeasurementFeature && primitive is CylinderPrimitive,
             Area = primitive.SourceAreaMm2,
             AngleRad = primitive is ConePrimitive cone ? cone.HalfAngleRad : null,
+            ConeLength = primitive is ConePrimitive coneWithLength ? coneWithLength.Length : null,
+            ConeAxisStart = primitive is ConePrimitive { AxisStartX: not null, AxisStartY: not null, AxisStartZ: not null } coneStart
+                ? [coneStart.AxisStartX.Value, coneStart.AxisStartY.Value, coneStart.AxisStartZ.Value]
+                : null,
+            ConeAxisEnd = primitive is ConePrimitive { AxisEndX: not null, AxisEndY: not null, AxisEndZ: not null } coneEnd
+                ? [coneEnd.AxisEndX.Value, coneEnd.AxisEndY.Value, coneEnd.AxisEndZ.Value]
+                : null,
+            ConeRefRadius = primitive is ConePrimitive coneRef ? coneRef.RefRadius : null,
+            ConeRadiusStart = primitive is ConePrimitive coneRs ? coneRs.RadiusStart : null,
+            ConeRadiusEnd = primitive is ConePrimitive coneRe ? coneRe.RadiusEnd : null,
             SurfaceType = primitive is Surface3DPrimitive surface ? surface.SurfaceType : null,
             FittingMethod = fittingMethod,
             Tolerances = item.Tolerances.Select(tolerance => tolerance.Name).ToList(),
