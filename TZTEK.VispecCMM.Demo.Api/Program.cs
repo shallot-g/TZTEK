@@ -67,6 +67,27 @@ app.MapGet("/api/demo/sessions/{id}", (string id, DemoSessionService service) =>
         : Results.NotFound(new { error = "演示会话不存在或已过期。" });
 });
 
+app.MapPost("/api/demo/sessions/{id}/features/selection", (string id, FeatureSelectionRequest request, DemoSessionService service) =>
+{
+    try { return Results.Ok(service.SaveSelection(id, request)); }
+    catch (KeyNotFoundException ex) { return Results.NotFound(new { error = ex.Message }); }
+    catch (ArgumentException ex) { return Results.BadRequest(new { error = ex.Message }); }
+});
+
+app.MapPost("/api/demo/sessions/{id}/measurement-plan", async (string id, MeasurementPlanRequest request, DemoSessionService service, CancellationToken ct) =>
+{
+    try { return Results.Ok(await service.GenerateMeasurementPlanAsync(id, request, ct)); }
+    catch (KeyNotFoundException ex) { return Results.NotFound(new { error = ex.Message }); }
+    catch (ArgumentException ex) { return Results.BadRequest(new { error = ex.Message }); }
+    catch (Exception ex) { return Results.BadRequest(new { error = ex.Message }); }
+});
+
+app.MapDelete("/api/demo/sessions/{id}/measurement-plan", (string id, DemoSessionService service) =>
+{
+    try { service.ClearMeasurementPlan(id); return Results.NoContent(); }
+    catch (KeyNotFoundException ex) { return Results.NotFound(new { error = ex.Message }); }
+});
+
 app.MapGet("/api/demo/sessions/{id}/model", (string id, DemoSessionService service) =>
 {
     if (!service.TryGetModel(id, out var path) || !File.Exists(path))

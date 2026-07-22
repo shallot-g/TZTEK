@@ -7,6 +7,9 @@ public sealed class DemoSessionDto
     public int Progress { get; set; }
     public string Stage { get; set; } = "等待处理";
     public string? Error { get; set; }
+    public string WorkflowStage { get; set; } = "FeaturesReady";
+    public IReadOnlyList<string> SelectedFeatureIds { get; set; } = [];
+    public bool AiAssistEnabled { get; set; }
     public VisualizationResultDto? Result { get; set; }
 }
 
@@ -19,9 +22,20 @@ public sealed class VisualizationResultDto
     public IReadOnlyList<VisualizationFeatureDto> Features { get; init; } = [];
     public VisualizationPathPlanDto BaselinePlan { get; init; } = new();
     public VisualizationPathPlanDto OptimizedPlan { get; init; } = new();
+    public IReadOnlyList<AiFeatureRecommendation> AiRecommendations { get; init; } = [];
     public VisualizationProbeDto? Probe { get; init; }
     public IReadOnlyList<VisualizationWarningDto> Warnings { get; init; } = [];
     public VisualizationBoundsDto Bounds { get; init; } = new();
+}
+
+public sealed class AiFeatureRecommendation
+{
+    public string FeatureId { get; init; } = string.Empty;
+    public string Status { get; init; } = "NeedsReview";
+    public double Confidence { get; init; }
+    public string Reason { get; init; } = string.Empty;
+    public int? PageNumber { get; init; }
+    public string? AnnotationId { get; init; }
 }
 
 public sealed class VisualizationFeatureDto

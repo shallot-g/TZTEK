@@ -12,6 +12,9 @@ export interface DemoSession {
   progress: number
   stage: string
   error?: string
+  workflowStage: string
+  selectedFeatureIds: string[]
+  aiAssistEnabled: boolean
   result?: VisualizationResult
 }
 
@@ -51,6 +54,15 @@ export interface VisualizationFeature {
   fittingMethod?: string
   tolerances: string[]
   measurementPoints: MeasurementPoint[]
+}
+
+export interface AiFeatureRecommendation {
+  featureId: string
+  status: string
+  confidence: number
+  reason: string
+  pageNumber?: number
+  annotationId?: string
 }
 
 export interface MeasurementPoint {

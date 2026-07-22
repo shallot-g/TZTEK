@@ -65,11 +65,19 @@ public sealed class PrimitiveToleranceService : IPrimitiveToleranceService
     }
 
     public IReadOnlyList<MeasurementTask> GenerateMeasurementTasks(MeasurementPlanOptions options)
+        => GenerateMeasurementTasks([], options);
+
+    public IReadOnlyList<MeasurementTask> GenerateMeasurementTasks(
+        IReadOnlyCollection<string> primitiveIds,
+        MeasurementPlanOptions options)
     {
         if (_lastImportResult is null)
             return [];
 
-        var tasks = _measurementPlanner.Plan(_lastImportResult.Items, _assignedProbes, options).ToList();
+        var items = primitiveIds.Count == 0
+            ? _lastImportResult.Items
+            : _lastImportResult.Items.Where(item => primitiveIds.Contains(item.Primitive.Id, StringComparer.OrdinalIgnoreCase)).ToList();
+        var tasks = _measurementPlanner.Plan(items, _assignedProbes, options).ToList();
         foreach (var task in tasks)
             task.SourceFilePath = _lastImportResult.FilePath;
 

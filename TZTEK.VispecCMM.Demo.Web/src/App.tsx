@@ -15,7 +15,7 @@ import {
   Search,
   Upload,
 } from 'lucide-react'
-import { createExampleSession, createUploadSession, getExamples, getSession } from './api'
+import { clearMeasurementPlan, createExampleSession, createUploadSession, generateMeasurementPlan, getExamples, getSession, saveFeatureSelection } from './api'
 import Viewer from './Viewer'
 import type { DemoExample, DemoSession, LayerState, VisualizationFeature, VisualizationResult } from './types'
 
@@ -38,7 +38,11 @@ export default function App() {
   const [error, setError] = useState('')
   const [query, setQuery] = useState('')
   const [selectedFeatureId, setSelectedFeatureId] = useState<string>()
-  const [planMode, setPlanMode] = useState<'baseline' | 'optimized'>('optimized')
+  const [selectedFeatureIds, setSelectedFeatureIds] = useState<string[]>([])
+  const [savedFeatureIds, setSavedFeatureIds] = useState<string[]>([])
+  const [aiAssistEnabled, setAiAssistEnabled] = useState(false)
+  const [isGeneratingPlan, setIsGeneratingPlan] = useState(false)
+  const [planProgress, setPlanProgress] = useState(0)
   const [currentStep, setCurrentStep] = useState(0)
   const [playing, setPlaying] = useState(false)
   const [speed, setSpeed] = useState(1)
@@ -62,6 +66,8 @@ export default function App() {
       if (value.status === 'Completed' && value.result) {
         setResult(value.result)
         setSelectedFeatureId(value.result.features[0]?.id)
+        setSelectedFeatureIds(value.selectedFeatureIds ?? [])
+        setSavedFeatureIds(value.selectedFeatureIds ?? [])
       }
     }).catch(reason => setError(reason instanceof Error ? reason.message : '无法加载演示会话'))
   }, [])
@@ -75,6 +81,8 @@ export default function App() {
         if (next.status === 'Completed' && next.result) {
           setResult(next.result)
           setSelectedFeatureId(next.result.features[0]?.id)
+          setSelectedFeatureIds(next.selectedFeatureIds ?? [])
+          setSavedFeatureIds(next.selectedFeatureIds ?? [])
           setCurrentStep(0)
         }
         if (next.status === 'Failed') setError(next.error ?? '处理失败')
@@ -85,7 +93,22 @@ export default function App() {
     return () => window.clearInterval(timer)
   }, [session])
 
-  const plan = result ? (planMode === 'optimized' ? result.optimizedPlan : result.baselinePlan) : undefined
+  const plan = result?.optimizedPlan ?? {
+    name: '尚未生成路径',
+    segments: [],
+    statistics: {
+      primitiveCount: 0,
+      featureCount: 0,
+      measurementPointCount: 0,
+      movementCount: 0,
+      measurementCount: 0,
+      gotoCount: 0,
+      autoGotoCount: 0,
+      manualGotoCount: 0,
+      totalPathLengthMm: 0,
+      estimatedTimeSeconds: 0,
+    },
+  }
   const selectedFeature = result?.features.find(value => value.id === selectedFeatureId)
   const filteredFeatures = useMemo(() => {
     if (!result) return []
@@ -97,10 +120,7 @@ export default function App() {
   const measurementFeatures = filteredFeatures.filter(feature => feature.isMeasurementFeature)
   const rawFeatures = filteredFeatures.filter(feature => !feature.isMeasurementFeature)
 
-  useEffect(() => {
-    setCurrentStep(0)
-    setPlaying(false)
-  }, [planMode, result])
+  useEffect(() => { setCurrentStep(0); setPlaying(false) }, [result])
 
   useEffect(() => {
     if (!playing || !plan || plan.segments.length === 0) return
@@ -129,12 +149,51 @@ export default function App() {
     setError('')
     setResult(undefined)
     setPlaying(false)
+    setSelectedFeatureIds([])
+    setSavedFeatureIds([])
     try {
       setSession(await factory())
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : '无法创建演示会话')
     }
   }
+
+  const toggleFeature = (id: string) => setSelectedFeatureIds(current => current.includes(id) ? current.filter(value => value !== id) : [...current, id])
+  const saveSelection = async () => {
+    if (!session) return
+    try {
+      await saveFeatureSelection(session.id, selectedFeatureIds)
+      setSavedFeatureIds([...selectedFeatureIds])
+      setError('')
+    } catch (reason) { setError(reason instanceof Error ? reason.message : '保存选择失败') }
+  }
+  const selectAllFeatures = () => { if (result) setSelectedFeatureIds(result.features.map(feature => feature.id)) }
+  const clearSelection = () => setSelectedFeatureIds([])
+  const generatePlan = async () => {
+    if (!session || selectedFeatureIds.length === 0) return
+    try {
+      setError('')
+      setIsGeneratingPlan(true)
+      setPlanProgress(10)
+      await new Promise(resolve => window.setTimeout(resolve, 120))
+      setPlanProgress(30)
+      const next = await generateMeasurementPlan(session.id, selectedFeatureIds)
+      setPlanProgress(90)
+      setSession(next)
+      if (next.result) {
+        setResult(next.result)
+        setSelectedFeatureIds(next.selectedFeatureIds ?? selectedFeatureIds)
+        setSavedFeatureIds(next.selectedFeatureIds ?? selectedFeatureIds)
+        setSelectedFeatureId(next.result.features.find(feature => (next.selectedFeatureIds ?? selectedFeatureIds).includes(feature.id))?.id ?? next.result.features[0]?.id)
+      }
+      setPlanProgress(100)
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : '生成路径失败')
+    } finally {
+      window.setTimeout(() => setIsGeneratingPlan(false), 350)
+    }
+  }
+  const clearPlan = async () => { if (session) { await clearMeasurementPlan(session.id); const next = await getSession(session.id); setSession(next); setResult(next.result) } }
 
   const exportJson = () => {
     if (!result) return
@@ -147,11 +206,7 @@ export default function App() {
   }
 
   const currentSegment = plan?.segments[currentStep]
-  const baseline = result?.baselinePlan.statistics
   const optimized = result?.optimizedPlan.statistics
-  const reduction = baseline && optimized && baseline.totalPathLengthMm > 0
-    ? (1 - optimized.totalPathLengthMm / baseline.totalPathLengthMm) * 100
-    : 0
 
   return (
     <main className="app-shell">
@@ -180,6 +235,10 @@ export default function App() {
             <Upload size={17} />
             开始解析
           </button>
+          <label className="icon-text-button"><input type="checkbox" checked={aiAssistEnabled} onChange={event => setAiAssistEnabled(event.target.checked)} /> AI 辅助</label>
+          <button className="icon-text-button" disabled={!result} onClick={saveSelection}>保存选择</button>
+          <button className="primary-button" disabled={!result || selectedFeatureIds.length === 0 || session?.status === 'Processing' || isGeneratingPlan} onClick={generatePlan}>{isGeneratingPlan ? '正在生成…' : '生成测量路径'}</button>
+          <button className="icon-button" disabled={!result?.optimizedPlan.statistics.featureCount} onClick={clearPlan} title="清除路径"><RotateCcw size={17} /></button>
           <div className="example-control">
             <select value={exampleId} onChange={event => setExampleId(event.target.value)} aria-label="示例文件">
               {examples.map(example => <option key={example.id} value={example.id}>{example.name}</option>)}
@@ -205,7 +264,7 @@ export default function App() {
         <Metric label="自动 GOTO" value={optimized?.autoGotoCount ?? 0} accent="blue" />
         <Metric label="人工 GOTO" value={optimized?.manualGotoCount ?? 0} accent={optimized?.manualGotoCount ? 'red' : undefined} />
         <Metric label="路径长度" value={optimized ? `${optimized.totalPathLengthMm.toFixed(1)} mm` : '0 mm'} />
-        <Metric label="缩短" value={`${Math.max(reduction, 0).toFixed(1)}%`} accent="amber" />
+        <Metric label="已选择" value={selectedFeatureIds.length} accent="amber" />
       </section>
 
       <section className="workspace">
@@ -213,8 +272,15 @@ export default function App() {
           <div className="panel-heading">
             <div>
               <h2>识别元素</h2>
-              <span>{filteredFeatures.length} / {result?.features.length ?? 0}</span>
+              <span>已识别：{result?.features.length ?? 0} · 已选择：{selectedFeatureIds.length}</span>
             </div>
+            <div className="feature-selection-tools">
+              <button onClick={selectAllFeatures} disabled={!result?.features.length}>全选</button>
+              <button onClick={clearSelection} disabled={selectedFeatureIds.length === 0}>清空</button>
+            </div>
+          </div>
+          <div className="selection-status">
+            {selectedFeatureIds.length === 0 ? '请勾选需要测量的基元' : selectedFeatureIds.join('|') !== savedFeatureIds.join('|') ? '有未保存的基元选择' : '选择已保存'}
           </div>
           <label className="search-box">
             <Search size={15} />
@@ -222,9 +288,9 @@ export default function App() {
           </label>
           <div className="feature-list">
             {measurementFeatures.length > 0 && <div className="feature-group-label">测量特征</div>}
-            {measurementFeatures.map(feature => <FeatureRow key={feature.id} feature={feature} selected={feature.id === selectedFeatureId} onSelect={setSelectedFeatureId} />)}
+            {measurementFeatures.map(feature => <FeatureRow key={feature.id} feature={feature} selected={feature.id === selectedFeatureId} checked={selectedFeatureIds.includes(feature.id)} onSelect={setSelectedFeatureId} onToggle={toggleFeature} />)}
             {rawFeatures.length > 0 && <div className="feature-group-label">原始 CAD 曲面</div>}
-            {rawFeatures.map(feature => <FeatureRow key={feature.id} feature={feature} selected={feature.id === selectedFeatureId} onSelect={setSelectedFeatureId} />)}
+            {rawFeatures.map(feature => <FeatureRow key={feature.id} feature={feature} selected={feature.id === selectedFeatureId} checked={selectedFeatureIds.includes(feature.id)} onSelect={setSelectedFeatureId} onToggle={toggleFeature} />)}
             {!result && <EmptyList />}
           </div>
         </aside>
@@ -232,8 +298,7 @@ export default function App() {
         <section className="viewport-panel">
           <div className="viewport-toolbar">
             <div className="segmented-control">
-              <button className={planMode === 'baseline' ? 'active' : ''} onClick={() => setPlanMode('baseline')}>基础路径</button>
-              <button className={planMode === 'optimized' ? 'active' : ''} onClick={() => setPlanMode('optimized')}>优化路径</button>
+              <span>人工选择路径</span>
             </div>
             <div className="camera-controls">
               {['top', 'front', 'side', 'iso'].map(view => (
@@ -261,7 +326,7 @@ export default function App() {
           </div>
 
           <div className="viewport-stage">
-            {result && plan ? (
+            {result ? (
               <Viewer
                 result={result}
                 plan={plan}
@@ -273,6 +338,17 @@ export default function App() {
               />
             ) : (
               <WorkspaceEmpty />
+            )}
+            {isGeneratingPlan && (
+              <div className="plan-generation-overlay">
+                <div className="plan-generation-panel">
+                  <strong>正在生成测量路径</strong>
+                  <span>已选择 {selectedFeatureIds.length} 个基元</span>
+                  <div className="plan-generation-track"><i style={{ width: `${planProgress}%` }} /></div>
+                  <small>{planProgress < 30 ? '准备已选基元' : planProgress < 90 ? '生成测点并执行安全路径与碰撞检查' : '整理路径结果'}</small>
+                  <em>{planProgress}%</em>
+                </div>
+              </div>
             )}
             {session && session.status !== 'Completed' && session.status !== 'Failed' && (
               <div className="processing-overlay">
@@ -374,16 +450,17 @@ function FeatureDetails({ feature }: { feature: VisualizationFeature }) {
   )
 }
 
-function FeatureRow({ feature, selected, onSelect }: { feature: VisualizationFeature; selected: boolean; onSelect: (id: string) => void }) {
+function FeatureRow({ feature, selected, checked, onSelect, onToggle }: { feature: VisualizationFeature; selected: boolean; checked: boolean; onSelect: (id: string) => void; onToggle: (id: string) => void }) {
   return (
-    <button className={`feature-row ${selected ? 'selected' : ''}`} onClick={() => onSelect(feature.id)}>
+    <div className={`feature-row ${selected ? 'selected' : ''}`} onClick={() => onSelect(feature.id)}>
+      <input className="feature-select-checkbox" type="checkbox" checked={checked} onChange={() => onToggle(feature.id)} onClick={event => event.stopPropagation()} aria-label={`选择 ${feature.name}`} />
       <span className={`feature-swatch type-${feature.type.toLowerCase()}`} />
       <span className="feature-copy">
         <strong>{feature.name}</strong>
         <small>{feature.type} · {feature.measurementPoints.length} 点</small>
       </span>
       <ChevronRight size={14} />
-    </button>
+    </div>
   )
 }
 

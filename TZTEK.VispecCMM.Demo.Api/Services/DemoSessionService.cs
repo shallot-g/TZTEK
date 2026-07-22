@@ -94,6 +94,69 @@ public sealed class DemoSessionService
         return true;
     }
 
+    public FeatureSelectionResponse SaveSelection(string id, FeatureSelectionRequest request)
+    {
+        if (!_sessions.TryGetValue(id, out var entry) || entry.Import is null)
+            throw new KeyNotFoundException("演示会话不存在、已过期或尚未完成导入。");
+
+        var available = entry.Import.Items.Select(item => item.Primitive.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var unknown = request.FeatureIds.Where(featureId => !available.Contains(featureId)).Distinct().ToList();
+        if (unknown.Count > 0)
+            throw new ArgumentException($"包含未知基元：{string.Join(", ", unknown)}");
+
+        entry.Dto.SelectedFeatureIds = request.FeatureIds.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        entry.Dto.WorkflowStage = "SelectionSaved";
+        return new FeatureSelectionResponse
+        {
+            SelectedCount = entry.Dto.SelectedFeatureIds.Count,
+            UnselectedCount = available.Count - entry.Dto.SelectedFeatureIds.Count
+        };
+    }
+
+    public async Task<DemoSessionDto> GenerateMeasurementPlanAsync(string id, MeasurementPlanRequest request, CancellationToken ct)
+    {
+        if (!_sessions.TryGetValue(id, out var entry) || entry.Import is null)
+            throw new KeyNotFoundException("演示会话不存在、已过期或尚未完成导入。");
+
+        SaveSelection(id, new FeatureSelectionRequest { FeatureIds = request.FeatureIds });
+        if (entry.Dto.SelectedFeatureIds.Count == 0)
+            throw new ArgumentException("请至少选择一个可测基元。");
+
+        entry.Dto.Status = "Processing";
+        entry.Dto.WorkflowStage = "GeneratingPath";
+        entry.Dto.Stage = "根据已选基元生成测量路径";
+        entry.Dto.Progress = 70;
+        try
+        {
+            using var services = CreateAlgorithmServices();
+            var service = services.GetRequiredService<IPrimitiveToleranceService>();
+            var import = await service.ImportAsync(entry.InputPath, new ImportOptions(), cancellationToken: ct);
+            var task = service.GenerateMeasurementTasks(entry.Dto.SelectedFeatureIds, CreateSelectedOptions(request)).FirstOrDefault()
+                ?? throw new InvalidOperationException("所选基元未能生成测量任务。");
+            entry.Dto.Result = VisualizationMapper.Map(entry.Dto.Id, import, new MeasurementTask(), task, entry.ModelPath is not null);
+            entry.Dto.Status = "Completed";
+            entry.Dto.WorkflowStage = "PathReady";
+            entry.Dto.Stage = "测量路径已生成";
+            entry.Dto.Progress = 100;
+            return entry.Dto;
+        }
+        catch
+        {
+            entry.Dto.Status = "Completed";
+            entry.Dto.WorkflowStage = "PathFailed";
+            throw;
+        }
+    }
+
+    public void ClearMeasurementPlan(string id)
+    {
+        if (!_sessions.TryGetValue(id, out var entry) || entry.Import is null)
+            throw new KeyNotFoundException("演示会话不存在、已过期或尚未完成导入。");
+        entry.Dto.SelectedFeatureIds = [];
+        entry.Dto.Result = VisualizationMapper.Map(entry.Dto.Id, entry.Import, new MeasurementTask(), new MeasurementTask(), entry.ModelPath is not null);
+        entry.Dto.WorkflowStage = "FeaturesReady";
+    }
+
     private SessionEntry CreateEntry(string fileName)
     {
         var id = Guid.NewGuid().ToString("N");
@@ -143,18 +206,9 @@ public sealed class DemoSessionService
             entry.Dto.Stage = value.Stage;
         });
         var import = await service.ImportAsync(entry.InputPath, new ImportOptions(), progress);
+        entry.Import = import;
 
-        entry.Dto.Progress = 60;
-        entry.Dto.Stage = "生成基础测量路径";
-        var baseline = service.GenerateMeasurementTasks(CreateBaselineOptions()).FirstOrDefault()
-            ?? throw new InvalidOperationException("没有生成基础测量任务。");
-
-        entry.Dto.Progress = 72;
-        entry.Dto.Stage = "生成优化测量路径";
-        var optimized = service.GenerateMeasurementTasks(CreateOptimizedOptions()).FirstOrDefault()
-            ?? throw new InvalidOperationException("没有生成优化测量任务。");
-
-        entry.Dto.Progress = 82;
+        entry.Dto.Progress = 70;
         entry.Dto.Stage = "生成可视化模型";
         entry.ModelPath = await StepMeshExporter.TryExportAsync(entry.InputPath, entry.Directory, _environment.ContentRootPath, _logger);
 
@@ -163,11 +217,12 @@ public sealed class DemoSessionService
         entry.Dto.Result = VisualizationMapper.Map(
             entry.Dto.Id,
             import,
-            baseline,
-            optimized,
+            new MeasurementTask(),
+            new MeasurementTask(),
             entry.ModelPath is not null);
         entry.Dto.Progress = 100;
         entry.Dto.Stage = "已完成";
+        entry.Dto.WorkflowStage = "FeaturesReady";
         entry.Dto.Status = "Completed";
     }
 
@@ -179,23 +234,13 @@ public sealed class DemoSessionService
         return collection.BuildServiceProvider();
     }
 
-    private static MeasurementPlanOptions CreateBaselineOptions() => new()
+    private static MeasurementPlanOptions CreateSelectedOptions(MeasurementPlanRequest request) => new()
     {
         PathStrategy = PathOptimizationStrategy.ImportOrder,
         EnableCollisionAvoidance = true,
-        EnableContinuousFeaturePath = false,
-        EnableContinuousCylinderPath = false,
-        EnableSinglePointSafetyPath = true,
-        EnableCollisionCheck = false
-    };
-
-    private static MeasurementPlanOptions CreateOptimizedOptions() => new()
-    {
-        PathStrategy = PathOptimizationStrategy.TwoOpt,
-        EnableCollisionAvoidance = true,
-        EnableContinuousFeaturePath = true,
-        EnableContinuousCylinderPath = true,
-        EnableCollisionCheck = true,
+        EnableContinuousFeaturePath = request.EnableContinuousFeaturePath,
+        EnableContinuousCylinderPath = request.EnableContinuousFeaturePath,
+        EnableCollisionCheck = request.EnableCollisionCheck,
         EnableGotoAvoidance = true,
         EnableAutoGlobalSafeGoto = true,
         EnableInterFeatureAutoGoto = true,
@@ -274,5 +319,28 @@ public sealed class DemoSessionService
         public required string InputPath { get; init; }
         public DateTime CreatedAt { get; init; }
         public string? ModelPath { get; set; }
+        public ImportResult? Import { get; set; }
     }
+}
+
+public sealed class FeatureSelectionRequest
+{
+    public IReadOnlyList<string> FeatureIds { get; init; } = [];
+    public string SelectionSource { get; init; } = "Manual";
+}
+
+public sealed class FeatureSelectionResponse
+{
+    public int SelectedCount { get; init; }
+    public int UnselectedCount { get; init; }
+    public int UnreachableCount { get; init; }
+    public string Status { get; init; } = "SelectionSaved";
+}
+
+public sealed class MeasurementPlanRequest
+{
+    public IReadOnlyList<string> FeatureIds { get; init; } = [];
+    public string PathStrategy { get; init; } = "ImportOrder";
+    public bool EnableCollisionCheck { get; init; } = true;
+    public bool EnableContinuousFeaturePath { get; init; } = true;
 }

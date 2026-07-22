@@ -23,3 +23,21 @@ export async function createExampleSession(id: string): Promise<DemoSession> {
 export async function getSession(id: string): Promise<DemoSession> {
   return readJson(await fetch(`/api/demo/sessions/${id}`))
 }
+
+export async function saveFeatureSelection(id: string, featureIds: string[]): Promise<void> {
+  await readJson(await fetch(`/api/demo/sessions/${id}/features/selection`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ featureIds, selectionSource: 'Manual' }),
+  }))
+}
+
+export async function generateMeasurementPlan(id: string, featureIds: string[]): Promise<DemoSession> {
+  return readJson(await fetch(`/api/demo/sessions/${id}/measurement-plan`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ featureIds, pathStrategy: 'ImportOrder', enableCollisionCheck: true, enableContinuousFeaturePath: true }),
+  }))
+}
+
+export async function clearMeasurementPlan(id: string): Promise<void> {
+  await readJson(await fetch(`/api/demo/sessions/${id}/measurement-plan`, { method: 'DELETE' }))
+}

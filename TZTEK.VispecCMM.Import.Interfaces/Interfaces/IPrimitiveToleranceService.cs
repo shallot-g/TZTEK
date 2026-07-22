@@ -28,4 +28,8 @@ public interface IPrimitiveToleranceService
 
     /// <summary>生成测量任务</summary>
     IReadOnlyList<MeasurementTask> GenerateMeasurementTasks(MeasurementPlanOptions options);
+
+    IReadOnlyList<MeasurementTask> GenerateMeasurementTasks(
+        IReadOnlyCollection<string> primitiveIds,
+        MeasurementPlanOptions options);
 }
