@@ -129,7 +129,10 @@ internal static class VisualizationMapper
                 MovementCount = task.Steps.Count(step => step.StepType == MeasurementStepType.Movement),
                 MeasurementCount = measurementSteps.Count,
                 GotoCount = task.Steps.Count(step => step.GotoTarget is not null),
-                AutoGotoCount = task.Steps.Count(step => step.Name.Contains("Auto global safe GOTO", StringComparison.OrdinalIgnoreCase)),
+                AutoGotoCount = task.Steps.Count(step =>
+                    step.Name.Contains("Auto global safe GOTO", StringComparison.OrdinalIgnoreCase)
+                    || step.Name.Contains("Auto inter-feature GOTO", StringComparison.OrdinalIgnoreCase)
+                    || step.Name.Contains("Auto intra-feature GOTO", StringComparison.OrdinalIgnoreCase)),
                 ManualGotoCount = task.Steps.Count(step => step.GotoTarget?.Reason.Contains("manual GOTO", StringComparison.OrdinalIgnoreCase) == true),
                 TotalPathLengthMm = task.TotalPathLengthMm,
                 EstimatedTimeSeconds = task.EstimatedTotalTimeSeconds
@@ -141,14 +144,31 @@ internal static class VisualizationMapper
     {
         var result = new List<VisualizationPathSegmentDto>();
         (double X, double Y, double Z)? previous = null;
+        (double X, double Y, double Z)? previousApproach = null;
 
         foreach (var step in task.Steps)
         {
             if (step.StepType == MeasurementStepType.Movement && step.GotoTarget is not null)
             {
                 var end = (step.GotoTarget.X, step.GotoTarget.Y, step.GotoTarget.Z);
-                if (previous is not null)
-                    result.Add(MapSegment(step, previous.Value, end, "Movement"));
+                var isApproachTransit = IsApproachToApproachTransit(step);
+                var start = isApproachTransit && previousApproach is not null
+                    ? previousApproach.Value
+                    : previous;
+
+                if (start is not null)
+                    result.Add(MapSegment(step, start.Value, end, "Movement"));
+
+                if (step.Name.Contains("Return to approach point", StringComparison.OrdinalIgnoreCase))
+                    previousApproach = end;
+                else if (isApproachTransit)
+                    previousApproach = end;
+                else if (step.Name.Contains("Enter", StringComparison.OrdinalIgnoreCase)
+                    && step.Name.Contains("measurement path", StringComparison.OrdinalIgnoreCase))
+                    previousApproach = end;
+                else if (!step.Name.Contains("measurement path", StringComparison.OrdinalIgnoreCase))
+                    previousApproach = null;
+
                 previous = end;
                 continue;
             }
@@ -167,6 +187,18 @@ internal static class VisualizationMapper
         return result;
     }
 
+    private static bool IsApproachToApproachTransit(MeasurementStep step)
+    {
+        var name = step.Name;
+        if (name.Contains("Return to approach point", StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        return name.Contains("entry approach point", StringComparison.OrdinalIgnoreCase)
+            || (name.Contains("next", StringComparison.OrdinalIgnoreCase)
+                && name.Contains("approach point", StringComparison.OrdinalIgnoreCase))
+            || name.Contains("Move to approach point", StringComparison.OrdinalIgnoreCase);
+    }
+
     private static VisualizationPathSegmentDto MapSegment(
         MeasurementStep step,
         (double X, double Y, double Z) start,
@@ -174,10 +206,16 @@ internal static class VisualizationMapper
         string kind)
     {
         var reason = step.GotoTarget?.Reason;
-        var isAuto = step.Name.Contains("Auto global safe GOTO", StringComparison.OrdinalIgnoreCase);
+        var isAuto = step.Name.Contains("Auto global safe GOTO", StringComparison.OrdinalIgnoreCase)
+            || step.Name.Contains("Auto inter-feature GOTO", StringComparison.OrdinalIgnoreCase)
+            || step.Name.Contains("Auto intra-feature GOTO", StringComparison.OrdinalIgnoreCase);
         var isGoto = step.GotoTarget is not null && (isAuto || step.Name.Contains("GOTO", StringComparison.OrdinalIgnoreCase));
         var risk = reason?.Contains("manual GOTO", StringComparison.OrdinalIgnoreCase) == true
-            || reason?.Contains("risk", StringComparison.OrdinalIgnoreCase) == true;
+            || reason?.Contains("collision risk", StringComparison.OrdinalIgnoreCase) == true
+            || reason?.Contains("passes through", StringComparison.OrdinalIgnoreCase) == true
+            || reason?.Contains("Inter-feature transit has", StringComparison.OrdinalIgnoreCase) == true
+            || step.Name.Contains("Collision risk", StringComparison.OrdinalIgnoreCase)
+            || step.Name.Contains("Needs manual GOTO", StringComparison.OrdinalIgnoreCase);
         return new VisualizationPathSegmentDto
         {
             Kind = kind,

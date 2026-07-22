@@ -16,6 +16,7 @@ internal sealed class DefaultPathCollisionResolver : IPathCollisionResolver
         var anchors = BuildFeatureAnchors(task.Steps);
         var resolvedSteps = new List<MeasurementStep>();
         (double X, double Y, double Z)? previous = options.StartPoint;
+        (double X, double Y, double Z)? previousApproach = null;
         var segmentIndex = 0;
 
         foreach (var step in task.Steps)
@@ -29,35 +30,69 @@ internal sealed class DefaultPathCollisionResolver : IPathCollisionResolver
             }
 
             var target = ToPoint(step.GotoTarget);
-            if (previous is null || ShouldTrustGeneratedFeaturePath(step))
+            var isApproachTransit = IsApproachToApproachTransit(step);
+            var collisionStart = isApproachTransit && previousApproach is not null
+                ? previousApproach.Value
+                : previous;
+
+            if (collisionStart is null || ShouldSkipCollisionCheck(step))
             {
                 AddMovement(resolvedSteps, ref previous, step, target);
+                UpdateApproachTracking(step, target, ref previousApproach);
                 continue;
             }
 
             segmentIndex++;
             var collision = options.EnableDirectTransitionShortcut
-                ? _collisionChecker.Check(task, previous.Value, target, step, options, segmentIndex)
+                ? _collisionChecker.Check(task, collisionStart.Value, target, step, options, segmentIndex)
                 : new CollisionResult();
 
             if (!collision.HasCollision)
             {
                 AddMovement(resolvedSteps, ref previous, step, target);
+                UpdateApproachTracking(step, target, ref previousApproach);
                 continue;
             }
 
-            if (options.EnableGotoAvoidance && IsFeatureAnchorTransition(step, anchors))
+            if (ShouldTryAutoGoto(step))
             {
-                if (options.EnableAutoGlobalSafeGoto
-                    && TryCreateAutoGlobalSafeGoto(task, previous.Value, target, step, options, segmentIndex, out var autoGoto))
+                if (TryResolveInterFeatureCollision(
+                    task,
+                    collisionStart.Value,
+                    target,
+                    step,
+                    options,
+                    segmentIndex,
+                    resolvedSteps,
+                    ref previous,
+                    ref previousApproach))
                 {
-                    AddAutoGlobalSafeGotoPath(resolvedSteps, ref previous, step, target, autoGoto);
                     continue;
                 }
 
-                if (TrySelectUserGoto(task, previous.Value, target, step, options, segmentIndex, out var userGoto))
+                if (options.RequireUserGotoWhenAnchorTransitionCollides)
+                    AddManualGotoRequiredMovement(resolvedSteps, ref previous, step, target);
+                else
+                    AddCollisionRiskAcceptedMovement(resolvedSteps, ref previous, step, target);
+                UpdateApproachTracking(step, target, ref previousApproach);
+                continue;
+            }
+
+            if (options.EnableGotoAvoidance
+                && IsFeatureAnchorTransition(step, anchors))
+            {
+                if (options.EnableAutoGlobalSafeGoto
+                    && TryCreateAutoGlobalSafeGoto(task, collisionStart.Value, target, step, options, segmentIndex, out var autoGoto))
+                {
+                    AddAutoGlobalSafeGotoPath(resolvedSteps, ref previous, step, target, autoGoto);
+                    UpdateApproachTracking(step, target, ref previousApproach);
+                    continue;
+                }
+
+                if (TrySelectUserGoto(task, collisionStart.Value, target, step, options, segmentIndex, out var userGoto))
                 {
                     AddUserGotoPath(resolvedSteps, ref previous, step, target, userGoto);
+                    UpdateApproachTracking(step, target, ref previousApproach);
                     continue;
                 }
             }
@@ -66,6 +101,7 @@ internal sealed class DefaultPathCollisionResolver : IPathCollisionResolver
                 AddManualGotoRequiredMovement(resolvedSteps, ref previous, step, target);
             else
                 AddCollisionRiskAcceptedMovement(resolvedSteps, ref previous, step, target);
+            UpdateApproachTracking(step, target, ref previousApproach);
         }
 
         var totalLength = resolvedSteps.Sum(step => step.TravelDistanceMm ?? 0);
@@ -149,12 +185,173 @@ internal sealed class DefaultPathCollisionResolver : IPathCollisionResolver
             && AreSamePoint(step.GotoTarget, anchor.EntryGoto);
     }
 
-    private static bool ShouldTrustGeneratedFeaturePath(MeasurementStep step)
+    private static void UpdateApproachTracking(
+        MeasurementStep step,
+        (double X, double Y, double Z) target,
+        ref (double X, double Y, double Z)? previousApproach)
     {
-        return step.Name.Contains("measurement path", StringComparison.OrdinalIgnoreCase)
-            || step.Name.Contains("approach point", StringComparison.OrdinalIgnoreCase)
-            || step.Name.Contains("Retract", StringComparison.OrdinalIgnoreCase)
-            || step.Name.Contains("Return", StringComparison.OrdinalIgnoreCase);
+        var name = step.Name;
+        if (name.Contains("Return to approach point", StringComparison.OrdinalIgnoreCase))
+        {
+            previousApproach = target;
+            return;
+        }
+
+        if (name.Contains("next", StringComparison.OrdinalIgnoreCase)
+            && name.Contains("approach point", StringComparison.OrdinalIgnoreCase))
+        {
+            previousApproach = target;
+            return;
+        }
+
+        if (name.Contains("Enter", StringComparison.OrdinalIgnoreCase)
+            && name.Contains("measurement path", StringComparison.OrdinalIgnoreCase))
+        {
+            previousApproach = target;
+            return;
+        }
+
+        if (name.Contains("entry approach point", StringComparison.OrdinalIgnoreCase))
+        {
+            previousApproach = target;
+            return;
+        }
+
+        if (name.Contains("Move to approach point", StringComparison.OrdinalIgnoreCase))
+        {
+            previousApproach = target;
+            return;
+        }
+
+        if (!name.Contains("measurement path", StringComparison.OrdinalIgnoreCase))
+            previousApproach = null;
+    }
+
+    private static bool IsApproachToApproachTransit(MeasurementStep step)
+    {
+        var name = step.Name;
+        if (name.Contains("Return to approach point", StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        return name.Contains("entry approach point", StringComparison.OrdinalIgnoreCase)
+            || (name.Contains("next", StringComparison.OrdinalIgnoreCase)
+                && name.Contains("approach point", StringComparison.OrdinalIgnoreCase))
+            || name.Contains("Move to approach point", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsInterFeatureTransition(MeasurementStep step)
+    {
+        return step.Name.Contains("entry approach point", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool ShouldTryAutoGoto(MeasurementStep step)
+    {
+        return IsApproachToApproachTransit(step);
+    }
+
+    private static bool ShouldSkipCollisionCheck(MeasurementStep step)
+    {
+        var name = step.Name;
+
+        if (name.Contains("Auto global safe GOTO", StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        if (name.Contains("Auto inter-feature GOTO", StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        if (name.Contains("Auto intra-feature GOTO", StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        if (name.Contains("Return from inter-feature GOTO", StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        if (name.Contains("Return from intra-feature GOTO", StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        if (name.Contains("Enter", StringComparison.OrdinalIgnoreCase)
+            && name.Contains("measurement path", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (name.Contains("Exit", StringComparison.OrdinalIgnoreCase)
+            && name.Contains("measurement path", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (name.Contains("Return to approach point", StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        return false;
+    }
+
+    private bool TryResolveInterFeatureCollision(
+        MeasurementTask task,
+        (double X, double Y, double Z) start,
+        (double X, double Y, double Z) target,
+        MeasurementStep sourceStep,
+        MeasurementPlanOptions options,
+        int segmentIndex,
+        List<MeasurementStep> resolvedSteps,
+        ref (double X, double Y, double Z)? previous,
+        ref (double X, double Y, double Z)? previousApproach)
+    {
+        if (!options.EnableGotoAvoidance)
+            return false;
+
+        if (TrySelectUserGoto(task, start, target, sourceStep, options, segmentIndex, out var userGoto))
+        {
+            AddInterFeatureGotoPath(resolvedSteps, ref previous, sourceStep, target, userGoto, isUserGoto: true);
+            UpdateApproachTracking(sourceStep, target, ref previousApproach);
+            return true;
+        }
+
+        var searchCeilingZ = ResolveAutoSafeZ(task, sourceStep, options);
+        if (InterFeatureGotoFinder.TryFindShortestCollisionFreeGoto(
+            _collisionChecker,
+            task,
+            start,
+            target,
+            sourceStep,
+            options,
+            segmentIndex,
+            searchCeilingZ,
+            out var autoGoto))
+        {
+            AddInterFeatureGotoPath(resolvedSteps, ref previous, sourceStep, target, autoGoto, isUserGoto: false);
+            UpdateApproachTracking(sourceStep, target, ref previousApproach);
+            return true;
+        }
+
+        return false;
+    }
+
+    private static void AddInterFeatureGotoPath(
+        List<MeasurementStep> steps,
+        ref (double X, double Y, double Z)? previous,
+        MeasurementStep sourceStep,
+        (double X, double Y, double Z) target,
+        GotoPoint gotoPoint,
+        bool isUserGoto)
+    {
+        var isInterFeature = sourceStep.Name.Contains("entry approach point", StringComparison.OrdinalIgnoreCase);
+        AddGeneratedMovement(
+            steps,
+            ref previous,
+            sourceStep,
+            ToPoint(gotoPoint),
+            isUserGoto ? "Collision avoidance user GOTO" : isInterFeature ? "Auto inter-feature GOTO" : "Auto intra-feature GOTO",
+            gotoPoint.Reason);
+        AddGeneratedMovement(
+            steps,
+            ref previous,
+            sourceStep,
+            target,
+            isInterFeature ? "Return from inter-feature GOTO" : "Return from intra-feature GOTO",
+            isInterFeature
+                ? "Return from inter-feature GOTO to feature entry"
+                : "Return from intra-feature GOTO to next approach point");
     }
 
     private bool TrySelectUserGoto(
@@ -323,13 +520,19 @@ internal sealed class DefaultPathCollisionResolver : IPathCollisionResolver
     {
         var cloned = CloneStep(sourceStep, steps.Count + 1);
         cloned.Name = $"{sourceStep.Name} - Needs manual GOTO point";
+        var isApproachTransit = IsApproachToApproachTransit(sourceStep);
+        var isInterFeature = sourceStep.Name.Contains("entry approach point", StringComparison.OrdinalIgnoreCase);
         cloned.GotoTarget = new GotoPoint
         {
             Id = sourceStep.GotoTarget?.Id ?? $"manual_goto_required_{steps.Count + 1}",
             X = target.X,
             Y = target.Y,
             Z = target.Z,
-            Reason = "Anchor transition has collision risk; needs manual GOTO point"
+            Reason = isInterFeature
+                ? "Inter-feature transit has collision risk; needs manual GOTO point"
+                : isApproachTransit
+                    ? "Approach-point transit has collision risk; needs manual GOTO point"
+                    : "Anchor transition has collision risk; needs manual GOTO point"
         };
         cloned.TravelDistanceMm = previous is null ? 0 : Distance(previous.Value, target);
         cloned.EstimatedTimeSeconds = cloned.TravelDistanceMm.Value / DefaultMachineSpeedMmPerSecond;
@@ -345,13 +548,19 @@ internal sealed class DefaultPathCollisionResolver : IPathCollisionResolver
     {
         var cloned = CloneStep(sourceStep, steps.Count + 1);
         cloned.Name = $"{sourceStep.Name} - Collision risk accepted";
+        var isApproachTransit = IsApproachToApproachTransit(sourceStep);
+        var isInterFeature = sourceStep.Name.Contains("entry approach point", StringComparison.OrdinalIgnoreCase);
         cloned.GotoTarget = new GotoPoint
         {
             Id = sourceStep.GotoTarget?.Id ?? $"collision_risk_{steps.Count + 1}",
             X = target.X,
             Y = target.Y,
             Z = target.Z,
-            Reason = "Collision risk accepted without user GOTO point"
+            Reason = isInterFeature
+                ? "Inter-feature transit has collision risk; direct connection kept without safety plane detour"
+                : isApproachTransit
+                    ? "Approach-point transit passes through a measurable face; collision risk accepted"
+                    : "Collision risk accepted without user GOTO point"
         };
         cloned.TravelDistanceMm = previous is null ? 0 : Distance(previous.Value, target);
         cloned.EstimatedTimeSeconds = cloned.TravelDistanceMm.Value / DefaultMachineSpeedMmPerSecond;

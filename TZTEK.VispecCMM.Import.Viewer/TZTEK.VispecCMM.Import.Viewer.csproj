@@ -4,9 +4,9 @@
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <RootNamespace>TZTEK.VispecCMM.Import.Core</RootNamespace>
-    <AssemblyName>TZTEK.VispecCMM.Import.Core</AssemblyName>
-    <Description>Vispec CMM 导入默认实现</Description>
+    <RootNamespace>TZTEK.VispecCMM.Import.Viewer</RootNamespace>
+    <AssemblyName>TZTEK.VispecCMM.Import.Viewer</AssemblyName>
+    <Description>Vispec CMM 测量场景构建与导出</Description>
   </PropertyGroup>
 
   <ItemGroup>

@@ -150,11 +150,11 @@ IPrimitiveToleranceService.GenerateMeasurementTasks(options)
 
 ```text
 安全平面
-→ 进入某个测量特征
+→ 进入第一个测量特征
 → 连续测完该特征的所有测点
 → 退出该特征
-→ 回安全平面
-→ 进入下一个测量特征
+→ 直接进入下一个测量特征
+→ 全部特征测完后，回全局安全平面
 ```
 
 ### 新路径规划算法总结
@@ -175,7 +175,9 @@ MeasurementTask 原始测量特征
 核心设计原则：
 
 - **特征内部连续测量**：圆柱、平面、圆、圆弧、线、圆锥、球等基元会尽量在一个特征内连续测完，避免每个测点都回安全平面。
-- **特征之间直连优先**：从一个特征的退出锚点到下一个特征的入口锚点，如果碰撞检测通过，就直接移动，减少无意义绕行。
+- **特征之间直连优先**：从一个特征的退出锚点直接进入下一个特征的入口锚点，不再每组基元测完后回安全平面；若直连碰撞，自动搜索空间中总路径最短的 GOTO 绕行点。
+- **基元内测点路径优化**：同一基元内测点使用最近邻 + 2-opt 优化访问顺序。
+- **基元间首点衔接**：下一基元的第一个测点取距离上一基元最后测点最近的点。
 - **自动全局安全 GOTO**：如果直连有碰撞风险，系统会把路径抬到工件整体安全高度上方，再水平移动到目标特征上方，最后进入目标特征。
 - **人工 GOTO 只是兜底**：只有自动全局安全 GOTO 和用户预设 GOTO 都无法证明安全时，才标记需要人工设置 GOTO。
 - **当前不是工业级真实碰撞检测**：现在使用 AABB 粗筛加部分基元窄相检查，适合原型演示；夹具、侧孔、横向探针、机床行程仍需要后续增强。
@@ -206,6 +208,7 @@ new MeasurementPlanOptions
     EnableGotoAvoidance = true,
     EnableDirectTransitionShortcut = true,
     EnableAutoGlobalSafeGoto = true,
+    EnableInterFeatureAutoGoto = true,
     AutoSafeGotoExtraClearanceMm = 5.0,
     EnablePrimitiveNarrowPhaseCollisionCheck = true,
     RequireUserGotoWhenAnchorTransitionCollides = true
@@ -217,13 +220,14 @@ new MeasurementPlanOptions
 - `EnableCollisionAvoidance`：是否展开安全移动步骤。
 - `EnableContinuousFeaturePath`：平面、圆、圆弧、线、圆锥、球等是否按特征连续测量。
 - `EnableContinuousCylinderPath`：圆柱是否使用连续测量；空心圆柱会用“同轴小半径为内孔候选”的第一版启发式修正接近方向。
-- `EnableSinglePointSafetyPath`：当不适合连续测量时，是否退回“每个测点回安全平面”的保守策略。
+- `EnableSinglePointSafetyPath`：当不适合连续测量时，是否退回“逐点逼近测量”的保守策略；同样只在全部测量结束后返回全局安全平面。
 - `EnableCollisionCheck`：是否启用第一版保守碰撞检测。
 - `CollisionSafetyMarginMm`：碰撞体额外膨胀余量。
 - `EnableGotoAvoidance`：检测到碰撞时是否尝试插入 GOTO 点。
 - `UserGotoPoints`：用户或测量软件预设的安全 GOTO 点列表。
 - `EnableDirectTransitionShortcut`：特征锚点之间优先尝试无碰撞直线移动。
 - `EnableAutoGlobalSafeGoto`：锚点直连有碰撞时，是否自动尝试全局安全高度 GOTO。
+- `EnableInterFeatureAutoGoto`：基元间直连碰撞时，是否自动搜索最短无碰撞 GOTO 绕行点（起点→GOTO→终点两段路径总长最小）。
 - `AutoSafeGotoExtraClearanceMm`：自动全局安全 GOTO 在安全高度之上的额外余量。
 - `EnablePrimitiveNarrowPhaseCollisionCheck`：AABB 粗筛命中后，是否继续执行基元级窄相检查以降低误报。
 - `RequireUserGotoWhenAnchorTransitionCollides`：自动 GOTO 和用户 GOTO 都不可用时，是否标记需要人工 GOTO。

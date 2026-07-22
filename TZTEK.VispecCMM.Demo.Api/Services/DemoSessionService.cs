@@ -181,6 +181,7 @@ public sealed class DemoSessionService
 
     private static MeasurementPlanOptions CreateBaselineOptions() => new()
     {
+        PathStrategy = PathOptimizationStrategy.ImportOrder,
         EnableCollisionAvoidance = true,
         EnableContinuousFeaturePath = false,
         EnableContinuousCylinderPath = false,
@@ -190,12 +191,14 @@ public sealed class DemoSessionService
 
     private static MeasurementPlanOptions CreateOptimizedOptions() => new()
     {
+        PathStrategy = PathOptimizationStrategy.TwoOpt,
         EnableCollisionAvoidance = true,
         EnableContinuousFeaturePath = true,
         EnableContinuousCylinderPath = true,
         EnableCollisionCheck = true,
         EnableGotoAvoidance = true,
         EnableAutoGlobalSafeGoto = true,
+        EnableInterFeatureAutoGoto = true,
         EnablePrimitiveNarrowPhaseCollisionCheck = true
     };
 

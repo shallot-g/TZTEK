@@ -35,6 +35,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ICollisionChecker, DefaultCollisionChecker>();
         services.AddSingleton<IPathCollisionResolver, DefaultPathCollisionResolver>();
         services.AddSingleton<ISafePathPlanner, DefaultSafePathPlanner>();
+        services.AddSingleton<IPathOptimizer, DefaultPathOptimizer>();
         services.AddSingleton<IMeasurementPlanner, DefaultMeasurementPlanner>();
         services.AddSingleton<IPrimitiveToleranceService, PrimitiveToleranceService>();
 

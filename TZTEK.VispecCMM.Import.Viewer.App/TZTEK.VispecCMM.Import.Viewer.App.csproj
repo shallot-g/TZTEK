@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <UseWPF>true</UseWPF>
+    <RootNamespace>TZTEK.VispecCMM.Import.Viewer.App</RootNamespace>
+    <AssemblyName>TZTEK.VispecCMM.Import.Viewer.App</AssemblyName>
+    <Description>Vispec CMM 模型与测量路径可视化工具</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="HelixToolkit.Wpf" Version="2.26.0" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="8.0.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\TZTEK.VispecCMM.Import.Core\TZTEK.VispecCMM.Import.Core.csproj" />
+    <ProjectReference Include="..\TZTEK.VispecCMM.Import.Viewer\TZTEK.VispecCMM.Import.Viewer.csproj" />
+  </ItemGroup>
+
+</Project>

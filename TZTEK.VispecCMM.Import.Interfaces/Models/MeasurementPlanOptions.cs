@@ -23,6 +23,7 @@ public sealed class MeasurementPlanOptions
     public bool EnableDirectTransitionShortcut { get; set; } = true;
     public bool RequireUserGotoWhenAnchorTransitionCollides { get; set; } = true;
     public bool EnableAutoGlobalSafeGoto { get; set; } = true;
+    public bool EnableInterFeatureAutoGoto { get; set; } = true;
     public bool EnablePrimitiveNarrowPhaseCollisionCheck { get; set; } = true;
     public IReadOnlyList<GotoPoint> UserGotoPoints { get; set; } = [];
     public double CollisionSafetyMarginMm { get; set; } = 2.0;
