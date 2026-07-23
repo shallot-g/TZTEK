@@ -486,7 +486,20 @@ public sealed class PrimitiveToleranceExtractor : IPrimitiveToleranceExtractor
             AxisDirX = Get(dto.AxisDirection, 0),
             AxisDirY = Get(dto.AxisDirection, 1),
             AxisDirZ = Get(dto.AxisDirection, 2),
-            HalfAngleRad = dto.HalfAngleRad.Value
+            HalfAngleRad = dto.HalfAngleRad.Value,
+            AxisStartX = GetNullable(dto.AxisStart, 0),
+            AxisStartY = GetNullable(dto.AxisStart, 1),
+            AxisStartZ = GetNullable(dto.AxisStart, 2),
+            AxisEndX = GetNullable(dto.AxisEnd, 0),
+            AxisEndY = GetNullable(dto.AxisEnd, 1),
+            AxisEndZ = GetNullable(dto.AxisEnd, 2),
+            Length = dto.Length,
+            StartAngleRad = dto.StartAngleRad,
+            EndAngleRad = dto.EndAngleRad,
+            AngularSpanRad = dto.AngularSpanRad,
+            RefRadius = dto.RefRadius,
+            RadiusStart = dto.RadiusStart,
+            RadiusEnd = dto.RadiusEnd
         };
     }
 

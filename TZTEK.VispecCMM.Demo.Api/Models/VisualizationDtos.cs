@@ -58,6 +58,12 @@ public sealed class VisualizationFeatureDto
     public bool RequiresProbeReorientation { get; init; }
     public double? Area { get; init; }
     public double? AngleRad { get; init; }
+    public double? ConeLength { get; init; }
+    public double[]? ConeAxisStart { get; init; }
+    public double[]? ConeAxisEnd { get; init; }
+    public double? ConeRefRadius { get; init; }
+    public double? ConeRadiusStart { get; init; }
+    public double? ConeRadiusEnd { get; init; }
     public string? SurfaceType { get; init; }
     public string? FittingMethod { get; init; }
     public IReadOnlyList<string> Tolerances { get; init; } = [];

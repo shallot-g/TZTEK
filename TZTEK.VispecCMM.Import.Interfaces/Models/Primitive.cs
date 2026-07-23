@@ -172,8 +172,32 @@ public sealed class ConePrimitive : Primitive, IConePrimitive
     public double AxisDirY { get; set; }
     public double AxisDirZ { get; set; }
     public double HalfAngleRad { get; set; }
+    public double? AxisStartX { get; set; }
+    public double? AxisStartY { get; set; }
+    public double? AxisStartZ { get; set; }
+    public double? AxisEndX { get; set; }
+    public double? AxisEndY { get; set; }
+    public double? AxisEndZ { get; set; }
+    public double? Length { get; set; }
+    public double? StartAngleRad { get; set; }
+    public double? EndAngleRad { get; set; }
+    public double? AngularSpanRad { get; set; }
+    public double? RefRadius { get; set; }
+    public double? RadiusStart { get; set; }
+    public double? RadiusEnd { get; set; }
 
-    public override (double X, double Y, double Z) GetRepresentativePoint() => (ApexX, ApexY, ApexZ);
+    public override (double X, double Y, double Z) GetRepresentativePoint()
+    {
+        // For a trimmed cone (frustum), use the face centre, not the apex.
+        if (AxisStartX is not null && AxisEndX is not null)
+        {
+            return (
+                (AxisStartX.Value + AxisEndX.Value) / 2.0,
+                (AxisStartY.Value + AxisEndY.Value) / 2.0,
+                (AxisStartZ.Value + AxisEndZ.Value) / 2.0);
+        }
+        return (ApexX, ApexY, ApexZ);
+    }
     public override (double I, double J, double K) GetDirection() => Normalize(AxisDirX, AxisDirY, AxisDirZ);
     public override IReadOnlyList<MeasurementPoint> PlanPoints() => [];
 }

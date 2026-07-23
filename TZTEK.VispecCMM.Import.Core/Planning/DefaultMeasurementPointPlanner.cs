@@ -167,15 +167,42 @@ internal sealed class DefaultMeasurementPointPlanner : IMeasurementPointPlanner
         var (u, v) = BuildBasis(axis);
         var radialCount = Math.Max(3, options.ConeRadialPointCount);
         var levelCount = Math.Max(1, options.ConeLevelCount);
-        var distanceFromApex = 5.0;
         var points = new List<MeasurementPoint>();
 
-        for (var level = 0; level < levelCount; level++)
+        // Use the actual trimmed face extent when available.
+        var useFaceExtent = cone.AxisStartX is not null
+            && cone.AxisEndX is not null
+            && cone.RadiusStart is not null
+            && cone.RadiusEnd is not null
+            && cone.Length is > 1e-9;
+
+        if (useFaceExtent)
         {
-            var levelDistance = distanceFromApex * (level + 1);
-            var radius = Math.Max(0.5, Math.Tan(cone.HalfAngleRad) * levelDistance);
-            var center = Add((cone.ApexX, cone.ApexY, cone.ApexZ), Scale(axis, levelDistance));
-            points.AddRange(PlanCircularPoints(center, axis, u, v, radius, radialCount, 0, Math.PI * 2));
+            var startCenter = (cone.AxisStartX!.Value, cone.AxisStartY!.Value, cone.AxisStartZ!.Value);
+            var endCenter = (cone.AxisEndX!.Value, cone.AxisEndY!.Value, cone.AxisEndZ!.Value);
+            var rStart = cone.RadiusStart!.Value;
+            var rEnd = cone.RadiusEnd!.Value;
+            var length = cone.Length!.Value;
+
+            for (var level = 0; level < levelCount; level++)
+            {
+                var fraction = levelCount == 1 ? 0.5 : 0.2 + 0.6 * level / (levelCount - 1);
+                var center = Add(startCenter, Scale(Subtract(endCenter, startCenter), fraction));
+                var radius = rStart + (rEnd - rStart) * fraction;
+                points.AddRange(PlanCircularPoints(center, axis, u, v, Math.Max(radius, 0.25), radialCount, 0, Math.PI * 2));
+            }
+        }
+        else
+        {
+            // Fallback: extrapolate from apex (used when face extent is unknown).
+            var distanceFromApex = 5.0;
+            for (var level = 0; level < levelCount; level++)
+            {
+                var levelDistance = distanceFromApex * (level + 1);
+                var radius = Math.Max(0.5, Math.Tan(cone.HalfAngleRad) * levelDistance);
+                var center = Add((cone.ApexX, cone.ApexY, cone.ApexZ), Scale(axis, levelDistance));
+                points.AddRange(PlanCircularPoints(center, axis, u, v, radius, radialCount, 0, Math.PI * 2));
+            }
         }
 
         return points;
@@ -203,6 +230,26 @@ internal sealed class DefaultMeasurementPointPlanner : IMeasurementPointPlanner
 
     private static List<MeasurementPoint> PlanSurface(Surface3DPrimitive surface)
     {
+        // Use sampled surface vertices when available; fall back to centre point.
+        if (surface.Vertices.Count > 1)
+        {
+            // Estimate a normal from the first three non-collinear vertices.
+            (double X, double Y, double Z) normal = (0.0, 0.0, 1.0);
+            if (surface.Vertices.Count >= 3)
+            {
+                var a = surface.Vertices[0];
+                var b = surface.Vertices[1];
+                var c = surface.Vertices[2];
+                var u = (b.X - a.X, b.Y - a.Y, b.Z - a.Z);
+                var v = (c.X - a.X, c.Y - a.Y, c.Z - a.Z);
+                var cn = Cross(u, v);
+                normal = Normalize(cn);
+            }
+            return surface.Vertices
+                .Select(vtx => CreatePoint(vtx.X, vtx.Y, vtx.Z, normal.X, normal.Y, normal.Z))
+                .ToList<MeasurementPoint>();
+        }
+
         var point = surface.GetRepresentativePoint();
         return
         [
@@ -280,6 +327,11 @@ internal sealed class DefaultMeasurementPointPlanner : IMeasurementPointPlanner
 
     private static (double X, double Y, double Z) Scale((double X, double Y, double Z) value, double scale) =>
         (value.X * scale, value.Y * scale, value.Z * scale);
+
+    private static (double X, double Y, double Z) Subtract(
+        (double X, double Y, double Z) left,
+        (double X, double Y, double Z) right) =>
+        (left.X - right.X, left.Y - right.Y, left.Z - right.Z);
 
     private static (double X, double Y, double Z) Cross(
         (double X, double Y, double Z) left,
