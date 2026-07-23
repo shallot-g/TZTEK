@@ -237,6 +237,9 @@ public sealed class DemoSessionService
     private static MeasurementPlanOptions CreateSelectedOptions(MeasurementPlanRequest request) => new()
     {
         PathStrategy = PathOptimizationStrategy.ImportOrder,
+        // 人工选择针对的是原始基元 ID；不能在路径生成前再次合并已选择的面，
+        // 否则圆柱.stp 的两个半圆柱会变成一个测量特征，导致测点丢失。
+        EnableSameFeatureGrouping = false,
         EnableCollisionAvoidance = true,
         EnableContinuousFeaturePath = request.EnableContinuousFeaturePath,
         EnableContinuousCylinderPath = request.EnableContinuousFeaturePath,
