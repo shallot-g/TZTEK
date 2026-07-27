@@ -1,5 +1,7 @@
 namespace TZTEK.VispecCMM.Demo.Api.Models;
 
+using TZTEK.VispecCMM.Demo.Api.Services;
+
 public sealed class DemoSessionDto
 {
     public string Id { get; init; } = string.Empty;
@@ -10,7 +12,36 @@ public sealed class DemoSessionDto
     public string WorkflowStage { get; set; } = "FeaturesReady";
     public IReadOnlyList<string> SelectedFeatureIds { get; set; } = [];
     public bool AiAssistEnabled { get; set; }
+    public DrawingFileDto? DrawingFile { get; set; }
+    public string DrawingAssistStatus { get; set; } = "Idle";
+    public int DrawingAssistProgress { get; set; }
+    public IReadOnlyList<AiFeatureRecommendation> AiRecommendations { get; set; } = [];
     public VisualizationResultDto? Result { get; set; }
+}
+
+public sealed class DrawingFileDto
+{
+    public string FileName { get; init; } = string.Empty;
+    public long SizeBytes { get; init; }
+    public DateTime UploadedAt { get; init; }
+    public string Status { get; init; } = "Uploaded";
+}
+
+public sealed class DrawingAssistResult
+{
+    public string Status { get; init; } = "NotImplemented";
+    public string Message { get; init; } = string.Empty;
+    public IReadOnlyList<AiFeatureRecommendation> Recommendations { get; init; } = [];
+    public int TargetCount { get; init; }
+    public int RecommendedCount { get; init; }
+    public int LowConfidenceCount { get; init; }
+    public string? RequestId { get; init; }
+    public long ElapsedMilliseconds { get; init; }
+    public IReadOnlyList<DrawingAssistPageDiagnostic> PageDiagnostics { get; init; } = [];
+    public string Model { get; init; } = string.Empty;
+    public int PageCount { get; init; }
+    public int SuccessPageCount { get; init; }
+    public int FailedPageCount { get; init; }
 }
 
 public sealed class VisualizationResultDto
@@ -36,6 +67,7 @@ public sealed class AiFeatureRecommendation
     public string Reason { get; init; } = string.Empty;
     public int? PageNumber { get; init; }
     public string? AnnotationId { get; init; }
+    public IReadOnlyList<string> AlternativeFeatureIds { get; init; } = [];
 }
 
 public sealed class VisualizationFeatureDto

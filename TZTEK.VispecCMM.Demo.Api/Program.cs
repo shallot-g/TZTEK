@@ -8,6 +8,7 @@ builder.Services.Configure<FormOptions>(options =>
     options.MultipartBodyLengthLimit = 512 * 1024 * 1024;
 });
 builder.Services.AddSingleton<DemoSessionService>();
+builder.Services.AddHttpClient<IDrawingAssistClient, VolcengineDrawingAssistClient>();
 builder.Services.AddCors(options =>
 {
     options.AddDefaultPolicy(policy => policy
@@ -72,6 +73,41 @@ app.MapPost("/api/demo/sessions/{id}/features/selection", (string id, FeatureSel
     try { return Results.Ok(service.SaveSelection(id, request)); }
     catch (KeyNotFoundException ex) { return Results.NotFound(new { error = ex.Message }); }
     catch (ArgumentException ex) { return Results.BadRequest(new { error = ex.Message }); }
+});
+
+app.MapPut("/api/demo/sessions/{id}/ai-assist", (string id, AiAssistSettingsRequest request, DemoSessionService service) =>
+{
+    try { service.SetAiAssist(id, request.Enabled); return Results.NoContent(); }
+    catch (KeyNotFoundException ex) { return Results.NotFound(new { error = ex.Message }); }
+});
+
+app.MapPost("/api/demo/sessions/{id}/drawing", async (string id, HttpRequest request, DemoSessionService service, CancellationToken ct) =>
+{
+    if (!request.HasFormContentType)
+        return Results.BadRequest(new { error = "请使用 multipart/form-data 上传 PDF 图纸。" });
+    try
+    {
+        var form = await request.ReadFormAsync(ct);
+        var file = form.Files.GetFile("drawingFile");
+        if (file is null)
+            return Results.BadRequest(new { error = "请选择 PDF 图纸。" });
+        return Results.Ok(await service.UploadDrawingAsync(id, file, ct));
+    }
+    catch (KeyNotFoundException ex) { return Results.NotFound(new { error = ex.Message }); }
+    catch (Exception ex) when (ex is ArgumentException or NotSupportedException) { return Results.BadRequest(new { error = ex.Message }); }
+});
+
+app.MapDelete("/api/demo/sessions/{id}/drawing", (string id, DemoSessionService service) =>
+{
+    try { service.DeleteDrawing(id); return Results.NoContent(); }
+    catch (KeyNotFoundException ex) { return Results.NotFound(new { error = ex.Message }); }
+});
+
+app.MapPost("/api/demo/sessions/{id}/drawing-assist", async (string id, DemoSessionService service, CancellationToken ct) =>
+{
+    try { return Results.Ok(await service.RunDrawingAssistAsync(id, ct)); }
+    catch (KeyNotFoundException ex) { return Results.NotFound(new { error = ex.Message }); }
+    catch (InvalidOperationException ex) { return Results.BadRequest(new { error = ex.Message }); }
 });
 
 app.MapPost("/api/demo/sessions/{id}/measurement-plan", async (string id, MeasurementPlanRequest request, DemoSessionService service, CancellationToken ct) =>

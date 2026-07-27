@@ -9,6 +9,7 @@ namespace TZTEK.VispecCMM.Demo.Api.Services;
 
 public sealed class DemoSessionService
 {
+    private const long MaxDrawingSizeBytes = 100L * 1024 * 1024;
     private static readonly HashSet<string> SupportedExtensions = new(StringComparer.OrdinalIgnoreCase)
     {
         ".stp", ".step"
@@ -17,12 +18,14 @@ public sealed class DemoSessionService
     private readonly ConcurrentDictionary<string, SessionEntry> _sessions = new(StringComparer.OrdinalIgnoreCase);
     private readonly IWebHostEnvironment _environment;
     private readonly ILogger<DemoSessionService> _logger;
+    private readonly IDrawingAssistClient _drawingAssistClient;
     private readonly string _root;
 
-    public DemoSessionService(IWebHostEnvironment environment, ILogger<DemoSessionService> logger)
+    public DemoSessionService(IWebHostEnvironment environment, ILogger<DemoSessionService> logger, IDrawingAssistClient drawingAssistClient)
     {
         _environment = environment;
         _logger = logger;
+        _drawingAssistClient = drawingAssistClient;
         _root = Path.Combine(Path.GetTempPath(), "TZTEK-VispecCMM-Demo");
         Directory.CreateDirectory(_root);
     }
@@ -92,6 +95,139 @@ public sealed class DemoSessionService
             return false;
         TryDeleteDirectory(entry.Directory);
         return true;
+    }
+
+    public void SetAiAssist(string id, bool enabled)
+    {
+        if (!_sessions.TryGetValue(id, out var entry))
+            throw new KeyNotFoundException("演示会话不存在或已过期。");
+
+        entry.Dto.AiAssistEnabled = enabled;
+    }
+
+    public async Task<DrawingFileDto> UploadDrawingAsync(string id, IFormFile file, CancellationToken ct)
+    {
+        if (!_sessions.TryGetValue(id, out var entry))
+            throw new KeyNotFoundException("演示会话不存在或已过期。");
+        if (!string.Equals(Path.GetExtension(file.FileName), ".pdf", StringComparison.OrdinalIgnoreCase))
+            throw new NotSupportedException("图纸仅支持 PDF 文件。");
+        if (file.Length <= 0)
+            throw new ArgumentException("PDF 文件不能为空。");
+        if (file.Length > MaxDrawingSizeBytes)
+            throw new ArgumentException("PDF 文件不能超过 100 MB。");
+
+        var path = Path.Combine(entry.Directory, "drawing.pdf");
+        await using (var output = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.None))
+            await file.CopyToAsync(output, ct);
+
+        entry.DrawingPath = path;
+        entry.Dto.DrawingFile = new DrawingFileDto
+        {
+            FileName = Path.GetFileName(file.FileName),
+            SizeBytes = file.Length,
+            UploadedAt = DateTime.UtcNow
+        };
+        entry.Dto.DrawingAssistStatus = "Ready";
+        entry.Dto.AiRecommendations = [];
+        return entry.Dto.DrawingFile;
+    }
+
+    public void DeleteDrawing(string id)
+    {
+        if (!_sessions.TryGetValue(id, out var entry))
+            throw new KeyNotFoundException("演示会话不存在或已过期。");
+
+        if (entry.DrawingPath is not null && File.Exists(entry.DrawingPath))
+            File.Delete(entry.DrawingPath);
+        entry.DrawingPath = null;
+        entry.Dto.DrawingFile = null;
+        entry.Dto.DrawingAssistStatus = "Idle";
+        entry.Dto.AiRecommendations = [];
+    }
+
+    public async Task<DrawingAssistResponse> RunDrawingAssistAsync(string id, CancellationToken ct)
+    {
+        if (!_sessions.TryGetValue(id, out var entry) || entry.Import is null)
+            throw new KeyNotFoundException("演示会话不存在、已过期或尚未完成 STEP 导入。");
+        if (!entry.Dto.AiAssistEnabled)
+            throw new InvalidOperationException("请先开启 AI 辅助。");
+        if (entry.Dto.DrawingFile is null || entry.DrawingPath is null || !File.Exists(entry.DrawingPath))
+            throw new InvalidOperationException("请先上传 PDF 图纸。");
+
+        entry.Dto.DrawingAssistStatus = "RenderingDrawing";
+        entry.Dto.DrawingAssistProgress = 5;
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        try
+        {
+            var features = entry.Dto.Result?.Features ?? [];
+            var model = await _drawingAssistClient.AnalyzeAsync(
+                entry.DrawingPath,
+                features,
+                update =>
+                {
+                    entry.Dto.DrawingAssistStatus = update.Status;
+                    entry.Dto.DrawingAssistProgress = update.Progress;
+                },
+                ct);
+            entry.Dto.DrawingAssistStatus = "MatchingFeatures";
+            entry.Dto.DrawingAssistProgress = 75;
+            var allowed = features.Select(feature => feature.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var recommendations = model.Recommendations
+                .Where(item => allowed.Contains(item.FeatureId))
+                .GroupBy(item => item.FeatureId, StringComparer.OrdinalIgnoreCase)
+                .Select(group => group.OrderByDescending(item => item.Confidence).First())
+                .ToList();
+
+            // AI 只更新建议选择；用户仍需手动点击“生成测量路径”。
+            entry.Dto.AiRecommendations = recommendations;
+            entry.Dto.DrawingAssistProgress = 95;
+            entry.Dto.SelectedFeatureIds = entry.Dto.SelectedFeatureIds
+                .Concat(recommendations.Select(item => item.FeatureId))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            entry.Dto.DrawingAssistStatus = "Completed";
+            entry.Dto.DrawingAssistProgress = 100;
+            return new DrawingAssistResponse
+            {
+                Status = "Completed",
+                Message = model.Warnings.Count == 0
+                    ? "豆包已完成整页图纸与 STEP 基元推荐，请审核自动勾选结果。"
+                    : $"豆包已完成部分页面识别，存在 {model.Warnings.Count} 条警告，请审核推荐结果。",
+                Progress = 100,
+                TargetCount = model.TargetCount,
+                RecommendedCount = recommendations.Count,
+                LowConfidenceCount = recommendations.Count(item => item.Status == "NeedsReview"),
+                Recommendations = recommendations,
+                RequestId = model.RequestId,
+                Model = model.Model,
+                ElapsedMilliseconds = stopwatch.ElapsedMilliseconds,
+                PageDiagnostics = model.PageDiagnostics,
+                Warnings = model.Warnings
+            };
+        }
+        catch (TimeoutException ex)
+        {
+            entry.Dto.DrawingAssistStatus = "Failed";
+            entry.Dto.DrawingAssistProgress = 0;
+            entry.Dto.Error = ex.Message;
+            _logger.LogWarning(ex, "Drawing assist timed out for session {SessionId}", id);
+            throw new InvalidOperationException(ex.Message, ex);
+        }
+        catch (OperationCanceledException)
+        {
+            entry.Dto.DrawingAssistStatus = "Failed";
+            entry.Dto.DrawingAssistProgress = 0;
+            entry.Dto.Error = "AI 图纸识别被用户取消。";
+            throw;
+        }
+        catch (Exception ex)
+        {
+            entry.Dto.DrawingAssistStatus = "Failed";
+            entry.Dto.DrawingAssistProgress = 0;
+            entry.Dto.Error = ex.Message;
+            _logger.LogWarning(ex, "Drawing assist failed for session {SessionId}", id);
+            throw new InvalidOperationException($"AI 图纸识别失败：{ex.Message}", ex);
+        }
     }
 
     public FeatureSelectionResponse SaveSelection(string id, FeatureSelectionRequest request)
@@ -322,6 +458,7 @@ public sealed class DemoSessionService
         public required string InputPath { get; init; }
         public DateTime CreatedAt { get; init; }
         public string? ModelPath { get; set; }
+        public string? DrawingPath { get; set; }
         public ImportResult? Import { get; set; }
     }
 }
@@ -346,4 +483,9 @@ public sealed class MeasurementPlanRequest
     public string PathStrategy { get; init; } = "ImportOrder";
     public bool EnableCollisionCheck { get; init; } = true;
     public bool EnableContinuousFeaturePath { get; init; } = true;
+}
+
+public sealed class AiAssistSettingsRequest
+{
+    public bool Enabled { get; init; }
 }

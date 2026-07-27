@@ -15,7 +15,64 @@ export interface DemoSession {
   workflowStage: string
   selectedFeatureIds: string[]
   aiAssistEnabled: boolean
+  drawingFile?: DrawingFile
+  drawingAssistStatus: string
+  drawingAssistProgress: number
+  aiRecommendations: AiFeatureRecommendation[]
   result?: VisualizationResult
+}
+
+export interface DrawingFile {
+  fileName: string
+  sizeBytes: number
+  uploadedAt: string
+  status: string
+}
+
+export interface DrawingAssistResult {
+  status: string
+  message: string
+  progress: number
+  recommendations: AiFeatureRecommendation[]
+  targetCount: number
+  recommendedCount: number
+  lowConfidenceCount: number
+  requestId?: string
+  elapsedMilliseconds: number
+  warnings: string[]
+  pageDiagnostics: DrawingAssistPageDiagnostic[]
+  model: string
+  pageCount: number
+  successPageCount: number
+  failedPageCount: number
+}
+
+export interface DrawingAssistPageDiagnostic {
+  runId: string
+  pdfHash: string
+  imageHash: string
+  promptVersion: string
+  pageNumber: number
+  httpStatusCode?: number
+  requestId?: string
+  model: string
+  responseFields: string
+  outputCount: number
+  choicesCount: number
+  contentKinds: string
+  responseTextLength: number
+  elapsedMilliseconds: number
+  success: boolean
+  responseStatus: string
+  incompleteDetails?: string
+  finishReason?: string
+  inputTokens?: number
+  outputTokens?: number
+  totalTokens?: number
+  cachedTokens?: number
+  cacheHit: boolean
+  startedAt: string
+  completedAt: string
 }
 
 export interface VisualizationResult {
@@ -69,6 +126,7 @@ export interface AiFeatureRecommendation {
   reason: string
   pageNumber?: number
   annotationId?: string
+  alternativeFeatureIds: string[]
 }
 
 export interface MeasurementPoint {

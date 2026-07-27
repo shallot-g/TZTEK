@@ -13,9 +13,11 @@ import {
   Play,
   RotateCcw,
   Search,
+  Sparkles,
+  Trash2,
   Upload,
 } from 'lucide-react'
-import { clearMeasurementPlan, createExampleSession, createUploadSession, generateMeasurementPlan, getExamples, getSession, saveFeatureSelection } from './api'
+import { clearMeasurementPlan, createExampleSession, createUploadSession, deleteDrawing, generateMeasurementPlan, getExamples, getSession, saveFeatureSelection, setAiAssist, startDrawingAssist, uploadDrawing } from './api'
 import Viewer from './Viewer'
 import type { DemoExample, DemoSession, LayerState, VisualizationFeature, VisualizationResult } from './types'
 
@@ -41,6 +43,12 @@ export default function App() {
   const [selectedFeatureIds, setSelectedFeatureIds] = useState<string[]>([])
   const [savedFeatureIds, setSavedFeatureIds] = useState<string[]>([])
   const [aiAssistEnabled, setAiAssistEnabled] = useState(false)
+  const [drawingFile, setDrawingFile] = useState<File>()
+  const [drawingMessage, setDrawingMessage] = useState('')
+  const [isUploadingDrawing, setIsUploadingDrawing] = useState(false)
+  const [isDrawingAssistRunning, setIsDrawingAssistRunning] = useState(false)
+  const [drawingAssistProgress, setDrawingAssistProgress] = useState(0)
+  const [drawingAssistPhase, setDrawingAssistPhase] = useState('')
   const [isGeneratingPlan, setIsGeneratingPlan] = useState(false)
   const [planProgress, setPlanProgress] = useState(0)
   const [currentStep, setCurrentStep] = useState(0)
@@ -50,6 +58,7 @@ export default function App() {
   const [layerMenu, setLayerMenu] = useState(false)
   const [cameraView, setCameraView] = useState('iso')
   const fileInput = useRef<HTMLInputElement>(null)
+  const drawingInput = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     getExamples().then(values => {
@@ -63,6 +72,10 @@ export default function App() {
     if (!id) return
     getSession(id).then(value => {
       setSession(value)
+      setAiAssistEnabled(value.aiAssistEnabled)
+      setDrawingAssistProgress(value.drawingAssistProgress ?? 0)
+      setDrawingAssistPhase(describeDrawingAssistPhase(value.drawingAssistStatus, value.drawingAssistProgress ?? 0))
+      setIsDrawingAssistRunning(isDrawingAssistActive(value.drawingAssistStatus))
       if (value.status === 'Completed' && value.result) {
         setResult(value.result)
         setSelectedFeatureId(value.result.features[0]?.id)
@@ -73,11 +86,16 @@ export default function App() {
   }, [])
 
   useEffect(() => {
-    if (!session || session.status === 'Completed' || session.status === 'Failed') return
+    const aiAssistActive = isDrawingAssistRunning || ['RenderingDrawing', 'AnalyzingPages', 'MatchingFeatures'].includes(session?.drawingAssistStatus ?? '')
+    if (!session || (!aiAssistActive && (session.status === 'Completed' || session.status === 'Failed'))) return
     const timer = window.setInterval(async () => {
       try {
         const next = await getSession(session.id)
         setSession(next)
+        setAiAssistEnabled(next.aiAssistEnabled)
+        setDrawingAssistProgress(next.drawingAssistProgress ?? 0)
+        setDrawingAssistPhase(describeDrawingAssistPhase(next.drawingAssistStatus, next.drawingAssistProgress ?? 0))
+        setIsDrawingAssistRunning(isDrawingAssistActive(next.drawingAssistStatus))
         if (next.status === 'Completed' && next.result) {
           setResult(next.result)
           setSelectedFeatureId(next.result.features[0]?.id)
@@ -91,7 +109,7 @@ export default function App() {
       }
     }, 700)
     return () => window.clearInterval(timer)
-  }, [session])
+  }, [session, isDrawingAssistRunning])
 
   const plan = result?.optimizedPlan ?? {
     name: '尚未生成路径',
@@ -151,6 +169,9 @@ export default function App() {
     setPlaying(false)
     setSelectedFeatureIds([])
     setSavedFeatureIds([])
+    setAiAssistEnabled(false)
+    setDrawingFile(undefined)
+    setDrawingMessage('')
     try {
       setSession(await factory())
     } catch (reason) {
@@ -195,6 +216,71 @@ export default function App() {
   }
   const clearPlan = async () => { if (session) { await clearMeasurementPlan(session.id); const next = await getSession(session.id); setSession(next); setResult(next.result) } }
 
+  const toggleAiAssist = async (enabled: boolean) => {
+    if (!session) return
+    try {
+      await setAiAssist(session.id, enabled)
+      setAiAssistEnabled(enabled)
+      setSession(current => current ? { ...current, aiAssistEnabled: enabled } : current)
+      setDrawingMessage('')
+    } catch (reason) { setError(reason instanceof Error ? reason.message : '无法设置 AI 辅助') }
+  }
+
+  const submitDrawing = async () => {
+    if (!session || !drawingFile) return
+    try {
+      setIsUploadingDrawing(true)
+      const uploaded = await uploadDrawing(session.id, drawingFile)
+      setSession(current => current ? { ...current, drawingFile: uploaded, drawingAssistStatus: 'Ready', drawingAssistProgress: 0, aiRecommendations: [] } : current)
+      setDrawingMessage('图纸已上传，尚未进行 AI 推荐')
+      setError('')
+    } catch (reason) { setError(reason instanceof Error ? reason.message : '上传图纸失败') }
+    finally { setIsUploadingDrawing(false) }
+  }
+
+  const removeDrawing = async () => {
+    if (!session) return
+    try {
+      await deleteDrawing(session.id)
+      setDrawingFile(undefined)
+      setSession(current => current ? { ...current, drawingFile: undefined, drawingAssistStatus: 'Idle', drawingAssistProgress: 0, aiRecommendations: [] } : current)
+      setDrawingMessage('')
+    } catch (reason) { setError(reason instanceof Error ? reason.message : '移除图纸失败') }
+  }
+
+  const requestDrawingAssist = async () => {
+    if (!session) return
+    try {
+      setIsDrawingAssistRunning(true)
+      setDrawingAssistProgress(5)
+      setDrawingAssistPhase('渲染完整 PDF 页面')
+      setSession(current => current ? { ...current, drawingAssistStatus: 'RenderingDrawing', drawingAssistProgress: 5 } : current)
+      const response = await startDrawingAssist(session.id)
+      setSession(current => current ? { ...current, drawingAssistStatus: response.status, drawingAssistProgress: response.progress, aiRecommendations: response.recommendations } : current)
+      setDrawingAssistProgress(response.progress)
+      setDrawingAssistPhase('推荐完成')
+      const recommendedIds = response.recommendations.map(item => item.featureId)
+      setSelectedFeatureIds(current => Array.from(new Set([...current, ...recommendedIds])))
+      const pageDiagnostics = response.pageDiagnostics ?? []
+      const successfulPages = pageDiagnostics.filter(page => page.success).length
+      const failedPages = pageDiagnostics.length - successfulPages
+      const requestSummary = response.requestId ? ` request ID：${response.requestId}` : ''
+      const inputTokens = pageDiagnostics.reduce((sum, page) => sum + (page.inputTokens ?? 0), 0)
+      const outputTokens = pageDiagnostics.reduce((sum, page) => sum + (page.outputTokens ?? 0), 0)
+      const cachedTokens = pageDiagnostics.reduce((sum, page) => sum + (page.cachedTokens ?? 0), 0)
+      const elapsed = pageDiagnostics.reduce((sum, page) => sum + page.elapsedMilliseconds, 0)
+      const statuses = pageDiagnostics.filter(page => page.responseStatus || page.incompleteDetails).map(page => `第${page.pageNumber}页 ${page.responseStatus || ''}${page.incompleteDetails ? `（${page.incompleteDetails}）` : ''}`).join('；')
+      setDrawingMessage(`${response.message} 模型：${response.model || 'Doubao'}；成功页面 ${successfulPages}，失败页面 ${failedPages}，已自动勾选 ${response.recommendedCount} 个候选，低置信 ${response.lowConfidenceCount} 个；耗时 ${elapsed}ms，输入 token ${inputTokens}，输出 token ${outputTokens}，缓存 token ${cachedTokens}。${statuses ? `状态：${statuses}。` : ''}${requestSummary}`)
+      setError('')
+    } catch (reason) {
+      setDrawingAssistPhase('AI 推荐失败')
+      setDrawingAssistProgress(0)
+      setError(reason instanceof Error ? reason.message : 'AI 辅助请求失败')
+    } finally {
+      setIsDrawingAssistRunning(false)
+    }
+  }
+
   const exportJson = () => {
     if (!result) return
     const url = URL.createObjectURL(new Blob([JSON.stringify(result, null, 2)], { type: 'application/json' }))
@@ -209,7 +295,7 @@ export default function App() {
   const optimized = result?.optimizedPlan.statistics
 
   return (
-    <main className="app-shell">
+    <main className={`app-shell ${result ? 'drawing-assist-visible' : ''}`}>
       <header className="topbar">
         <div className="brand-block">
           <Box size={21} />
@@ -235,7 +321,7 @@ export default function App() {
             <Upload size={17} />
             开始解析
           </button>
-          <label className="icon-text-button"><input type="checkbox" checked={aiAssistEnabled} onChange={event => setAiAssistEnabled(event.target.checked)} /> AI 辅助</label>
+          <label className="ai-toggle" title={!result ? '请先导入 STEP' : '开启 PDF 图纸辅助入口'}><input type="checkbox" checked={aiAssistEnabled} disabled={!result} onChange={event => toggleAiAssist(event.target.checked)} /> AI 辅助</label>
           <button className="icon-text-button" disabled={!result} onClick={saveSelection}>保存选择</button>
           <button className="primary-button" disabled={!result || selectedFeatureIds.length === 0 || session?.status === 'Processing' || isGeneratingPlan} onClick={generatePlan}>{isGeneratingPlan ? '正在生成…' : '生成测量路径'}</button>
           <button className="icon-button" disabled={!result?.optimizedPlan.statistics.featureCount} onClick={clearPlan} title="清除路径"><RotateCcw size={17} /></button>
@@ -256,6 +342,27 @@ export default function App() {
           <span className="prototype-badge">原型级离线碰撞检测</span>
         </div>
       </header>
+
+      {result && (
+        <section className="drawing-assist-bar">
+          <div className="drawing-assist-title"><Sparkles size={17} /><div><strong>2D 图纸辅助</strong><span>{aiAssistEnabled ? 'AI 辅助已开启，可上传对应 PDF' : '请先开启顶部 AI 辅助，再使用图纸推荐'}</span></div></div>
+          <input ref={drawingInput} type="file" accept="application/pdf,.pdf" hidden onChange={event => setDrawingFile(event.target.files?.[0])} />
+          <button className="icon-text-button" disabled={!aiAssistEnabled} onClick={() => drawingInput.current?.click()} title={!aiAssistEnabled ? '请先开启 AI 辅助' : '选择与 STEP 对应的 PDF 图纸'}><FolderOpen size={16} /><span>{drawingFile?.name ?? '选择 PDF'}</span></button>
+          <button className="icon-text-button" disabled={!aiAssistEnabled || !drawingFile || isUploadingDrawing} onClick={submitDrawing}><Upload size={16} />{isUploadingDrawing ? '上传中…' : '上传图纸'}</button>
+          {session?.drawingFile && <div className="drawing-file-state"><strong>{session.drawingFile.fileName}</strong><span>{formatFileSize(session.drawingFile.sizeBytes)} · 已上传</span></div>}
+          <button className="primary-button" disabled={!session?.drawingFile || isDrawingAssistRunning} onClick={requestDrawingAssist}><Sparkles size={16} />{isDrawingAssistRunning ? 'AI 推荐中…' : '开始 AI 推荐'}</button>
+          <button className="icon-button" disabled={!session?.drawingFile} onClick={removeDrawing} title="移除图纸"><Trash2 size={16} /></button>
+          <div className="drawing-assist-status">
+            <span className="drawing-assist-message">{drawingMessage || drawingAssistPhase || '等待 AI 推荐'}</span>
+            {(isDrawingAssistRunning || drawingAssistProgress > 0 || session?.drawingAssistStatus === 'Failed') && (
+              <>
+                <div className="drawing-assist-progress-track"><i style={{ width: `${drawingAssistProgress}%` }} /></div>
+                <small>{drawingAssistPhase || describeDrawingAssistPhase(session?.drawingAssistStatus ?? '', drawingAssistProgress)}</small>
+              </>
+            )}
+          </div>
+        </section>
+      )}
 
       <section className="summary-strip">
         <Metric label="基元" value={optimized?.primitiveCount ?? 0} />
@@ -492,6 +599,23 @@ function WorkspaceEmpty() {
 
 function formatVector(value: [number, number, number]) {
   return value.map(item => item.toFixed(2)).join(', ')
+}
+
+function formatFileSize(bytes: number) {
+  return bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`
+}
+
+function isDrawingAssistActive(status: string) {
+  return status === 'RenderingDrawing' || status === 'AnalyzingPages' || status === 'MatchingFeatures'
+}
+
+function describeDrawingAssistPhase(status: string, progress: number) {
+  if (status === 'Completed') return '推荐完成'
+  if (status === 'Failed') return 'AI 推荐失败'
+  if (status === 'RenderingDrawing') return '渲染完整 PDF 页面'
+  if (status === 'AnalyzingPages') return '豆包整页识别'
+  if (status === 'MatchingFeatures') return '匹配 STEP 基元'
+  return progress > 0 ? '正在处理' : '等待 AI 推荐'
 }
 
 function layerLabel(key: string) {

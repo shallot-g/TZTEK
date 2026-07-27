@@ -23,11 +23,8 @@ public sealed class PythonParserClient : IPythonParserClient
         ImportOptions options,
         CancellationToken ct = default)
     {
-        var python = Environment.GetEnvironmentVariable("TZTEK_PARSER_PYTHON");
-        if (string.IsNullOrWhiteSpace(python))
-            python = "python";
-
         var script = ResolveParserScriptPath();
+        var python = ResolvePythonExecutable(script);
         var stdout = await _processRunner.RunAsync(
                 python,
                 [
@@ -64,5 +61,27 @@ public sealed class PythonParserClient : IPythonParserClient
 
         throw new FileNotFoundException(
             "Cannot find tools/import_parser/parse_file.py. Set TZTEK_IMPORT_PARSER_SCRIPT to the parser script path.");
+    }
+
+    private static string ResolvePythonExecutable(string script)
+    {
+        var configured = Environment.GetEnvironmentVariable("TZTEK_PARSER_PYTHON");
+        if (!string.IsNullOrWhiteSpace(configured))
+            return configured;
+
+        // The repository ships a dedicated STEP environment. Using the system
+        // Python here makes CadQuery appear missing even when the sidecar is installed.
+        var parserDirectory = Path.GetDirectoryName(script);
+        var repositoryRoot = parserDirectory is null
+            ? null
+            : Directory.GetParent(parserDirectory)?.Parent?.FullName;
+        if (repositoryRoot is not null)
+        {
+            var bundledPython = Path.Combine(repositoryRoot, ".venv-step", "Scripts", "python.exe");
+            if (File.Exists(bundledPython))
+                return bundledPython;
+        }
+
+        return "python";
     }
 }
