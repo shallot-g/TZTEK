@@ -71,9 +71,10 @@ internal sealed class DefaultCollisionChecker : ICollisionChecker
     {
         var margin = ResolveProbeRadius(movementStep) + Math.Max(0, options.CollisionSafetyMarginMm);
         var target = movementStep.TargetItem?.Primitive;
-        return task.Steps
-            .Select(step => step.TargetItem?.Primitive)
-            .OfType<Primitive>()
+        var candidates = task.CollisionPrimitives.Count > 0
+            ? task.CollisionPrimitives
+            : task.Steps.Select(step => step.TargetItem?.Primitive).OfType<Primitive>().ToList();
+        return candidates
             .Where(primitive => !ShouldExcludePrimitive(target, primitive, movementStep))
             .DistinctBy(primitive => primitive.Id)
             .Select(primitive => TryBuildBox(primitive, margin))

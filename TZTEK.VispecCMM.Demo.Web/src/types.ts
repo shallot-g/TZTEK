@@ -120,12 +120,19 @@ export interface VisualizationFeature {
 }
 
 export interface AiFeatureRecommendation {
+  targetId: string
   featureId: string
   status: string
   confidence: number
   reason: string
   pageNumber?: number
   annotationId?: string
+  viewId?: string
+  featureType2D: string
+  featureTypeHints3D: string[]
+  isDimensioned: boolean
+  isDatumReferenced: boolean
+  isLeaderReferenced: boolean
   alternativeFeatureIds: string[]
 }
 
@@ -154,6 +161,8 @@ export interface PathSegment {
   isGoto: boolean
   isAutoGoto: boolean
   hasRisk: boolean
+  requiresManualGoto: boolean
+  isExecutable: boolean
   reason?: string
   distanceMm: number
 }
@@ -169,6 +178,10 @@ export interface Statistics {
   manualGotoCount: number
   totalPathLengthMm: number
   estimatedTimeSeconds: number
+  manualGotoRequiredCount: number
+  collisionRiskSegmentCount: number
+  unexecutableSegmentCount: number
+  collisionPrimitiveCount: number
 }
 
 export interface ProbeInfo {

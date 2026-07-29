@@ -224,9 +224,13 @@ export default function Viewer({ result, plan, currentStep, selectedFeatureId, l
       ])
       state.active.geometry.dispose()
       state.active.geometry = geometry
-      ;(state.active.material as THREE.LineBasicMaterial).color.setHex(segment.hasRisk ? colors.risk : segment.isGoto ? colors.goto : segment.kind === 'Measurement' ? colors.measurement : colors.selected)
-      state.probe.position.set(...segment.end)
-      state.probe.visible = true
+      ;(state.active.material as THREE.LineBasicMaterial).color.setHex(segment.hasRisk ? (segment.requiresManualGoto ? colors.goto : colors.risk) : segment.isGoto ? colors.goto : segment.kind === 'Measurement' ? colors.measurement : colors.selected)
+      if (!segment.hasRisk && segment.isExecutable !== false) {
+        state.probe.position.set(...segment.end)
+        state.probe.visible = true
+      } else {
+        state.probe.visible = false
+      }
     } else {
       state.probe.visible = false
     }
@@ -267,7 +271,7 @@ function updateLineSegments(object: THREE.LineSegments, segments: PathPlan['segm
   const colorsArray: number[] = []
   segments.forEach(segment => {
     vertices.push(...segment.start, ...segment.end)
-    const color = new THREE.Color(segment.hasRisk ? colors.risk : segment.isGoto ? colors.goto : segment.kind === 'Measurement' ? colors.measurement : completed ? colors.movement : 0x47525e)
+    const color = new THREE.Color(segment.hasRisk ? (segment.requiresManualGoto ? colors.goto : colors.risk) : segment.isGoto ? colors.goto : segment.kind === 'Measurement' ? colors.measurement : completed ? colors.movement : 0x47525e)
     colorsArray.push(color.r, color.g, color.b, color.r, color.g, color.b)
   })
   const geometry = new THREE.BufferGeometry()

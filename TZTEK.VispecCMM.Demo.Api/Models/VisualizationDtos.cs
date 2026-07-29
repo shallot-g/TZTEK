@@ -61,12 +61,19 @@ public sealed class VisualizationResultDto
 
 public sealed class AiFeatureRecommendation
 {
+    public string TargetId { get; init; } = string.Empty;
     public string FeatureId { get; init; } = string.Empty;
     public string Status { get; init; } = "NeedsReview";
     public double Confidence { get; init; }
     public string Reason { get; init; } = string.Empty;
     public int? PageNumber { get; init; }
     public string? AnnotationId { get; init; }
+    public string? ViewId { get; init; }
+    public string FeatureType2D { get; init; } = "Unknown";
+    public IReadOnlyList<string> FeatureTypeHints3D { get; init; } = [];
+    public bool IsDimensioned { get; init; }
+    public bool IsDatumReferenced { get; init; }
+    public bool IsLeaderReferenced { get; init; }
     public IReadOnlyList<string> AlternativeFeatureIds { get; init; } = [];
 }
 
@@ -130,6 +137,8 @@ public sealed record VisualizationPathSegmentDto
     public bool IsGoto { get; init; }
     public bool IsAutoGoto { get; init; }
     public bool HasRisk { get; init; }
+    public bool RequiresManualGoto { get; init; }
+    public bool IsExecutable { get; init; } = true;
     public string? Reason { get; init; }
     public double DistanceMm { get; init; }
 }
@@ -146,6 +155,10 @@ public sealed class VisualizationStatisticsDto
     public int ManualGotoCount { get; init; }
     public double TotalPathLengthMm { get; init; }
     public double EstimatedTimeSeconds { get; init; }
+    public int ManualGotoRequiredCount { get; init; }
+    public int CollisionRiskSegmentCount { get; init; }
+    public int UnexecutableSegmentCount { get; init; }
+    public int CollisionPrimitiveCount { get; init; }
 }
 
 public sealed class VisualizationProbeDto

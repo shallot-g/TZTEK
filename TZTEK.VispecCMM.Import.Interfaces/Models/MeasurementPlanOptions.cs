@@ -28,6 +28,8 @@ public sealed class MeasurementPlanOptions
     public IReadOnlyList<GotoPoint> UserGotoPoints { get; set; } = [];
     public double CollisionSafetyMarginMm { get; set; } = 2.0;
     public double AutoSafeGotoExtraClearanceMm { get; set; } = 5.0;
+    public int MaxAutoSafeGotoAttempts { get; set; } = 20;
+    public double MaxAutoSafeGotoHeightMm { get; set; }
     public ToleranceStandard ToleranceStandard { get; set; } = ToleranceStandard.ASME;
     public NamingRule? NamingRule { get; set; }
 

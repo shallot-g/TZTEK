@@ -123,6 +123,10 @@ export default function App() {
       gotoCount: 0,
       autoGotoCount: 0,
       manualGotoCount: 0,
+      manualGotoRequiredCount: 0,
+      collisionRiskSegmentCount: 0,
+      unexecutableSegmentCount: 0,
+      collisionPrimitiveCount: 0,
       totalPathLengthMm: 0,
       estimatedTimeSeconds: 0,
     },
@@ -259,7 +263,9 @@ export default function App() {
       setSession(current => current ? { ...current, drawingAssistStatus: response.status, drawingAssistProgress: response.progress, aiRecommendations: response.recommendations } : current)
       setDrawingAssistProgress(response.progress)
       setDrawingAssistPhase('推荐完成')
-      const recommendedIds = response.recommendations.map(item => item.featureId)
+      const recommendedIds = response.recommendations
+        .map(item => item.featureId)
+        .filter((featureId): featureId is string => Boolean(featureId))
       setSelectedFeatureIds(current => Array.from(new Set([...current, ...recommendedIds])))
       const pageDiagnostics = response.pageDiagnostics ?? []
       const successfulPages = pageDiagnostics.filter(page => page.success).length

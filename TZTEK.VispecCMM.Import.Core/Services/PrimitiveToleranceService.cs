@@ -77,9 +77,15 @@ public sealed class PrimitiveToleranceService : IPrimitiveToleranceService
         var items = primitiveIds.Count == 0
             ? _lastImportResult.Items
             : _lastImportResult.Items.Where(item => primitiveIds.Contains(item.Primitive.Id, StringComparer.OrdinalIgnoreCase)).ToList();
+        var collisionPrimitives = _lastImportResult.Items
+            .Select(item => item.Primitive)
+            .ToList();
         var tasks = _measurementPlanner.Plan(items, _assignedProbes, options).ToList();
         foreach (var task in tasks)
+        {
             task.SourceFilePath = _lastImportResult.FilePath;
+            task.CollisionPrimitives = collisionPrimitives;
+        }
 
         return tasks;
     }

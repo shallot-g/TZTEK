@@ -14,6 +14,8 @@ public sealed class MeasurementTask
     public ToleranceStandard ToleranceStandard { get; set; } = ToleranceStandard.ASME;
     public LengthUnit LengthUnit { get; set; } = LengthUnit.Millimeter;
     public IReadOnlyList<MeasurementStep> Steps { get; set; } = [];
+    /// <summary>完整工件碰撞几何；不等同于需要测量的 Steps。</summary>
+    public IReadOnlyList<Primitive> CollisionPrimitives { get; set; } = [];
     public IReadOnlyList<IProbe> ProbeConfigurations { get; set; } = [];
     public ISafetyPlane? GlobalSafetyPlane { get; set; }
     public PathOptimizationStrategy? PathOptimizationStrategy { get; set; }
@@ -39,6 +41,10 @@ public sealed class MeasurementStep
     public LightingInfo? LightingInfo { get; set; }
     public double? TravelDistanceMm { get; set; }
     public double EstimatedTimeSeconds { get; set; }
+    public bool RequiresManualGoto { get; set; }
+    public bool IsCollisionRisk { get; set; }
+    public string? CollisionReason { get; set; }
+    public bool CollisionValidated { get; set; }
 }
 
 /// <summary>

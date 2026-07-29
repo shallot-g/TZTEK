@@ -173,8 +173,7 @@ public sealed class DemoSessionService
             entry.Dto.DrawingAssistProgress = 75;
             var allowed = features.Select(feature => feature.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
             var recommendations = model.Recommendations
-                .Where(item => allowed.Contains(item.FeatureId))
-                .GroupBy(item => item.FeatureId, StringComparer.OrdinalIgnoreCase)
+                .GroupBy(item => string.IsNullOrWhiteSpace(item.TargetId) ? $"feature:{item.FeatureId}" : item.TargetId, StringComparer.OrdinalIgnoreCase)
                 .Select(group => group.OrderByDescending(item => item.Confidence).First())
                 .ToList();
 
@@ -182,7 +181,7 @@ public sealed class DemoSessionService
             entry.Dto.AiRecommendations = recommendations;
             entry.Dto.DrawingAssistProgress = 95;
             entry.Dto.SelectedFeatureIds = entry.Dto.SelectedFeatureIds
-                .Concat(recommendations.Select(item => item.FeatureId))
+                .Concat(recommendations.Where(item => allowed.Contains(item.FeatureId)).Select(item => item.FeatureId))
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToList();
             entry.Dto.DrawingAssistStatus = "Completed";
@@ -195,8 +194,8 @@ public sealed class DemoSessionService
                     : $"豆包已完成部分页面识别，存在 {model.Warnings.Count} 条警告，请审核推荐结果。",
                 Progress = 100,
                 TargetCount = model.TargetCount,
-                RecommendedCount = recommendations.Count,
-                LowConfidenceCount = recommendations.Count(item => item.Status == "NeedsReview"),
+                RecommendedCount = recommendations.Count(item => allowed.Contains(item.FeatureId)),
+                LowConfidenceCount = recommendations.Count(item => allowed.Contains(item.FeatureId) && item.Status == "NeedsReview"),
                 Recommendations = recommendations,
                 RequestId = model.RequestId,
                 Model = model.Model,
@@ -271,8 +270,9 @@ public sealed class DemoSessionService
                 ?? throw new InvalidOperationException("所选基元未能生成测量任务。");
             entry.Dto.Result = VisualizationMapper.Map(entry.Dto.Id, import, new MeasurementTask(), task, entry.ModelPath is not null);
             entry.Dto.Status = "Completed";
-            entry.Dto.WorkflowStage = "PathReady";
-            entry.Dto.Stage = "测量路径已生成";
+            var hasCollisionRisk = task.Steps.Any(step => step.IsCollisionRisk);
+            entry.Dto.WorkflowStage = hasCollisionRisk ? "PathReadyWithCollisionRisk" : "PathReady";
+            entry.Dto.Stage = hasCollisionRisk ? "路径已生成，但存在不可执行碰撞风险段" : "测量路径已生成";
             entry.Dto.Progress = 100;
             return entry.Dto;
         }

@@ -223,11 +223,13 @@ public sealed class VolcengineDrawingAssistClient : IDrawingAssistClient
             feature.Length,
             feature.IsInnerSurface
         });
-        return "请先观察整张工程图中的主视图、俯视图、侧视图和剖视图，只识别被尺寸、公差、基准或引出线明确指向的对象。\n"
-            + "结合箭头、尺寸线、标注位置和视图关系判断目标，再从候选 STEP 工程基元中选择最可能的 FeatureId。\n"
-            + "二维圆不能直接证明三维圆柱；无法确认时仍可给出最佳候选，但 RequiresReview=true。\n"
-            + "不要输出思考过程，不要解释分析过程，只返回最终 JSON。必须在最终响应中输出 targets 字段。即使无法匹配，也必须返回 {\"targets\":[]}。\n"
-            + "只返回 JSON：{\"targets\":[{\"pageNumber\":1,\"annotationId\":\"a1\",\"featureId\":\"候选ID\",\"alternativeFeatureIds\":[],\"confidence\":0.0,\"reason\":\"依据\",\"requiresReview\":false}]}\n"
+        return "请观察整张工程图中的主视图、俯视图、侧视图、剖视图和局部视图。\n"
+            + "识别图中所有能够根据二维轮廓、视图关系和工程制图规则可靠判断的工程对象，包括但不限于平面、圆柱、孔、轴、圆、圆弧、槽、锥面、球面和孔阵列。\n"
+            + "被尺寸、公差、基准或引出线明确指向的对象优先识别并提高优先级；没有明确标注但可以可靠判断的对象也必须返回，不要因为没有尺寸标注就忽略。\n"
+            + "先描述二维图纸中实际观察到的事实，再给出可能对应的三维工程类型。二维圆不能直接证明三维圆柱；无法确认三维类型时保留二维对象并设置 requiresReview=true。\n"
+            + "只允许从给定 STEP 候选 FeatureId 中选择，不能创造 ID。无法匹配 STEP 时 featureId 必须为空，但仍保留该对象并设置 requiresReview=true。\n"
+            + "不要输出思考过程，不要解释分析过程，只返回最终 JSON。必须在最终响应中输出 targets 字段。没有可识别对象时返回 {\"targets\":[]}。\n"
+            + "只返回 JSON：{\"targets\":[{\"targetId\":\"drawing_target_001\",\"pageNumber\":1,\"viewId\":\"front\",\"featureType2D\":\"Circle\",\"featureTypeHints3D\":[\"Hole\",\"Cylinder\"],\"annotationId\":\"a1\",\"featureId\":\"候选ID或空字符串\",\"alternativeFeatureIds\":[],\"isDimensioned\":true,\"isDatumReferenced\":false,\"isLeaderReferenced\":true,\"confidence\":0.0,\"reason\":\"依据\",\"requiresReview\":true}]}\n"
             + "候选 STEP 基元：\n"
             + JsonSerializer.Serialize(descriptors, JsonOptions);
     }
@@ -342,28 +344,39 @@ public sealed class VolcengineDrawingAssistClient : IDrawingAssistClient
             foreach (var target in targets.EnumerateArray())
             {
                 var id = target.TryGetProperty("featureId", out var idElement) ? idElement.GetString() : null;
-                if (string.IsNullOrWhiteSpace(id) || !allowed.Contains(id))
-                    continue;
+                var hasValidFeature = !string.IsNullOrWhiteSpace(id) && allowed.Contains(id);
                 var alternatives = target.TryGetProperty("alternativeFeatureIds", out var alt) && alt.ValueKind == JsonValueKind.Array
                     ? alt.EnumerateArray().Select(item => item.GetString() ?? string.Empty).Where(allowed.Contains).Distinct(StringComparer.OrdinalIgnoreCase).ToList()
                     : [];
                 var confidence = target.TryGetProperty("confidence", out var confidenceElement) && confidenceElement.TryGetDouble(out var value)
                     ? Math.Clamp(value, 0, 1) : 0;
                 var review = target.TryGetProperty("requiresReview", out var reviewElement) && reviewElement.ValueKind == JsonValueKind.True;
+                var targetId = target.TryGetProperty("targetId", out var targetIdElement) ? targetIdElement.GetString() : null;
                 recommendations.Add(new AiFeatureRecommendation
                 {
-                    FeatureId = id,
-                    Status = review || confidence < 0.6 || alternatives.Count > 0 ? "NeedsReview" : "Recommended",
+                    TargetId = targetId ?? $"page_{defaultPageNumber}_target_{recommendations.Count + 1}",
+                    FeatureId = hasValidFeature ? id! : string.Empty,
+                    Status = !hasValidFeature || review || confidence < 0.6 || alternatives.Count > 0 ? "NeedsReview" : "Recommended",
                     Confidence = confidence,
                     Reason = target.TryGetProperty("reason", out var reason) ? reason.GetString() ?? string.Empty : string.Empty,
                     PageNumber = target.TryGetProperty("pageNumber", out var page) && page.TryGetInt32(out var pageNumber) ? pageNumber : defaultPageNumber,
                     AnnotationId = target.TryGetProperty("annotationId", out var annotation) ? annotation.GetString() : null,
+                    ViewId = target.TryGetProperty("viewId", out var view) ? view.GetString() : null,
+                    FeatureType2D = target.TryGetProperty("featureType2D", out var type2d) ? type2d.GetString() ?? "Unknown" : "Unknown",
+                    FeatureTypeHints3D = target.TryGetProperty("featureTypeHints3D", out var hints) && hints.ValueKind == JsonValueKind.Array
+                        ? hints.EnumerateArray().Select(item => item.GetString() ?? string.Empty).Where(item => item.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase).ToList()
+                        : [],
+                    IsDimensioned = ReadBool(target, "isDimensioned"),
+                    IsDatumReferenced = ReadBool(target, "isDatumReferenced"),
+                    IsLeaderReferenced = ReadBool(target, "isLeaderReferenced"),
                     AlternativeFeatureIds = alternatives
                 });
             }
         }
         return new DrawingAssistModelResult { TargetCount = recommendations.Count, Recommendations = recommendations, RequestId = requestId };
     }
+
+    private static bool ReadBool(JsonElement element, string name) => element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.True;
 
     private static string ExtractJsonPayload(string content)
     {
