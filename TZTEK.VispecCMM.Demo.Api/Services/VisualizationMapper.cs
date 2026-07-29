@@ -144,10 +144,6 @@ internal static class VisualizationMapper
                     || step.Name.Contains("Auto inter-feature GOTO", StringComparison.OrdinalIgnoreCase)
                     || step.Name.Contains("Auto intra-feature GOTO", StringComparison.OrdinalIgnoreCase)),
                 ManualGotoCount = task.Steps.Count(step => step.GotoTarget?.Reason.Contains("manual GOTO", StringComparison.OrdinalIgnoreCase) == true),
-                ManualGotoRequiredCount = task.Steps.Count(step => step.RequiresManualGoto),
-                CollisionRiskSegmentCount = task.Steps.Count(step => step.IsCollisionRisk),
-                UnexecutableSegmentCount = task.Steps.Count(step => step.IsCollisionRisk),
-                CollisionPrimitiveCount = task.CollisionPrimitives.Count,
                 TotalPathLengthMm = task.TotalPathLengthMm,
                 EstimatedTimeSeconds = task.EstimatedTotalTimeSeconds
             }
@@ -165,13 +161,17 @@ internal static class VisualizationMapper
             if (step.StepType == MeasurementStepType.Movement && step.GotoTarget is not null)
             {
                 var end = (step.GotoTarget.X, step.GotoTarget.Y, step.GotoTarget.Z);
-                // 显示真实相邻路径段，不能把安全平面回撤/水平移动改画成接近点直连。
-                var start = previous;
+                var isApproachTransit = IsApproachToApproachTransit(step);
+                var start = isApproachTransit && previousApproach is not null
+                    ? previousApproach.Value
+                    : previous;
 
                 if (start is not null)
                     result.Add(MapSegment(step, start.Value, end, "Movement"));
 
                 if (step.Name.Contains("Return to approach point", StringComparison.OrdinalIgnoreCase))
+                    previousApproach = end;
+                else if (isApproachTransit)
                     previousApproach = end;
                 else if (step.Name.Contains("Enter", StringComparison.OrdinalIgnoreCase)
                     && step.Name.Contains("measurement path", StringComparison.OrdinalIgnoreCase))
@@ -236,8 +236,6 @@ internal static class VisualizationMapper
             IsGoto = isGoto,
             IsAutoGoto = isAuto,
             HasRisk = risk,
-            RequiresManualGoto = step.RequiresManualGoto,
-            IsExecutable = !step.IsCollisionRisk,
             Reason = reason,
             DistanceMm = Distance(start, end)
         };

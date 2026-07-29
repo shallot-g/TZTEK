@@ -16,7 +16,6 @@ internal sealed class DefaultPathCollisionResolver : IPathCollisionResolver
         var anchors = BuildFeatureAnchors(task.Steps);
         var resolvedSteps = new List<MeasurementStep>();
         (double X, double Y, double Z)? previous = options.StartPoint;
-        // 保留旧状态用于兼容既有 GOTO 识别，但不再覆盖真实碰撞检查起点。
         (double X, double Y, double Z)? previousApproach = null;
         var segmentIndex = 0;
 
@@ -31,8 +30,10 @@ internal sealed class DefaultPathCollisionResolver : IPathCollisionResolver
             }
 
             var target = ToPoint(step.GotoTarget);
-            // 必须检查路径中真实相邻的移动段，不能用接近点覆盖安全平面段。
-            var collisionStart = previous;
+            var isApproachTransit = IsApproachToApproachTransit(step);
+            var collisionStart = isApproachTransit && previousApproach is not null
+                ? previousApproach.Value
+                : previous;
 
             if (collisionStart is null || ShouldSkipCollisionCheck(step))
             {
@@ -113,7 +114,6 @@ internal sealed class DefaultPathCollisionResolver : IPathCollisionResolver
             ToleranceStandard = task.ToleranceStandard,
             LengthUnit = task.LengthUnit,
             Steps = resolvedSteps,
-            CollisionPrimitives = task.CollisionPrimitives,
             ProbeConfigurations = task.ProbeConfigurations,
             GlobalSafetyPlane = task.GlobalSafetyPlane,
             PathOptimizationStrategy = task.PathOptimizationStrategy,
@@ -268,6 +268,21 @@ internal sealed class DefaultPathCollisionResolver : IPathCollisionResolver
         if (name.Contains("Return from intra-feature GOTO", StringComparison.OrdinalIgnoreCase))
             return true;
 
+        if (name.Contains("Enter", StringComparison.OrdinalIgnoreCase)
+            && name.Contains("measurement path", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (name.Contains("Exit", StringComparison.OrdinalIgnoreCase)
+            && name.Contains("measurement path", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (name.Contains("Return to approach point", StringComparison.OrdinalIgnoreCase))
+            return true;
+
         return false;
     }
 
@@ -393,23 +408,13 @@ internal sealed class DefaultPathCollisionResolver : IPathCollisionResolver
         }
 
         var liftStep = Math.Max(1.0, options.SafetyClearanceMm);
-        var maxAttempts = Math.Max(1, options.MaxAutoSafeGotoAttempts);
-        var maxHeight = options.MaxAutoSafeGotoHeightMm > baseSafeZ
-            ? options.MaxAutoSafeGotoHeightMm
-            : double.PositiveInfinity;
-        for (var attempt = 0; attempt < maxAttempts; attempt++)
+        for (var attempt = 0; attempt < 4; attempt++)
         {
             var safeZ = baseSafeZ + liftStep * attempt;
-            if (safeZ > maxHeight)
-                break;
             var startAbove = (X: start.X, Y: start.Y, Z: safeZ);
             var targetAbove = (X: target.X, Y: target.Y, Z: safeZ);
-            if (_collisionChecker.Check(task, start, startAbove, sourceStep, options, segmentIndex).HasCollision)
-                continue;
             var horizontal = _collisionChecker.Check(task, startAbove, targetAbove, sourceStep, options, segmentIndex);
             if (horizontal.HasCollision)
-                continue;
-            if (_collisionChecker.Check(task, targetAbove, target, sourceStep, options, segmentIndex).HasCollision)
                 continue;
 
             gotoPoint = new GotoPoint
@@ -515,8 +520,6 @@ internal sealed class DefaultPathCollisionResolver : IPathCollisionResolver
     {
         var cloned = CloneStep(sourceStep, steps.Count + 1);
         cloned.Name = $"{sourceStep.Name} - Needs manual GOTO point";
-        cloned.RequiresManualGoto = true;
-        cloned.IsCollisionRisk = true;
         var isApproachTransit = IsApproachToApproachTransit(sourceStep);
         var isInterFeature = sourceStep.Name.Contains("entry approach point", StringComparison.OrdinalIgnoreCase);
         cloned.GotoTarget = new GotoPoint
@@ -531,7 +534,6 @@ internal sealed class DefaultPathCollisionResolver : IPathCollisionResolver
                     ? "Approach-point transit has collision risk; needs manual GOTO point"
                     : "Anchor transition has collision risk; needs manual GOTO point"
         };
-        cloned.CollisionReason = cloned.GotoTarget.Reason;
         cloned.TravelDistanceMm = previous is null ? 0 : Distance(previous.Value, target);
         cloned.EstimatedTimeSeconds = cloned.TravelDistanceMm.Value / DefaultMachineSpeedMmPerSecond;
         steps.Add(cloned);
@@ -546,7 +548,6 @@ internal sealed class DefaultPathCollisionResolver : IPathCollisionResolver
     {
         var cloned = CloneStep(sourceStep, steps.Count + 1);
         cloned.Name = $"{sourceStep.Name} - Collision risk accepted";
-        cloned.IsCollisionRisk = true;
         var isApproachTransit = IsApproachToApproachTransit(sourceStep);
         var isInterFeature = sourceStep.Name.Contains("entry approach point", StringComparison.OrdinalIgnoreCase);
         cloned.GotoTarget = new GotoPoint
@@ -561,7 +562,6 @@ internal sealed class DefaultPathCollisionResolver : IPathCollisionResolver
                     ? "Approach-point transit passes through a measurable face; collision risk accepted"
                     : "Collision risk accepted without user GOTO point"
         };
-        cloned.CollisionReason = cloned.GotoTarget.Reason;
         cloned.TravelDistanceMm = previous is null ? 0 : Distance(previous.Value, target);
         cloned.EstimatedTimeSeconds = cloned.TravelDistanceMm.Value / DefaultMachineSpeedMmPerSecond;
         steps.Add(cloned);
@@ -628,11 +628,7 @@ internal sealed class DefaultPathCollisionResolver : IPathCollisionResolver
             NewProbe = source.NewProbe,
             LightingInfo = source.LightingInfo,
             TravelDistanceMm = source.TravelDistanceMm,
-            EstimatedTimeSeconds = source.EstimatedTimeSeconds,
-            RequiresManualGoto = source.RequiresManualGoto,
-            IsCollisionRisk = source.IsCollisionRisk,
-            CollisionReason = source.CollisionReason,
-            CollisionValidated = source.CollisionValidated
+            EstimatedTimeSeconds = source.EstimatedTimeSeconds
         };
     }
 
@@ -652,9 +648,8 @@ internal sealed class DefaultPathCollisionResolver : IPathCollisionResolver
 
     private static double ResolveAutoSafeZ(MeasurementTask task, MeasurementStep sourceStep, MeasurementPlanOptions options)
     {
-        var maxZ = (task.CollisionPrimitives.Count > 0
-                ? task.CollisionPrimitives.SelectMany(EnumeratePrimitiveZValues)
-                : task.Steps.SelectMany(step => EnumerateStepZValues(step)))
+        var maxZ = task.Steps
+            .SelectMany(step => EnumerateStepZValues(step))
             .DefaultIfEmpty(0)
             .Max();
         var probeRadius = ResolveProbeRadius(sourceStep);

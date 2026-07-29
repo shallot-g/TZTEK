@@ -60,6 +60,19 @@ internal sealed class DefaultSafePathPlanner : ISafePathPlanner
             expandedSteps.Add(CloneStep(step, expandedSteps.Count + 1));
         }
 
+        if (measurementSteps.Count > 0 && previous is not null)
+        {
+            var lastStep = measurementSteps[^1];
+            var finalSafeAbove = (previous.Value.X, previous.Value.Y, safeZ);
+            AddMovement(
+                expandedSteps,
+                ref previous,
+                lastStep,
+                finalSafeAbove,
+                "Return to global safety plane",
+                task.GlobalSafetyPlane);
+        }
+
         var totalLength = expandedSteps.Sum(step => step.TravelDistanceMm ?? 0);
         var safeTask = new MeasurementTask
         {
@@ -70,7 +83,6 @@ internal sealed class DefaultSafePathPlanner : ISafePathPlanner
             ToleranceStandard = task.ToleranceStandard,
             LengthUnit = task.LengthUnit,
             Steps = expandedSteps,
-            CollisionPrimitives = task.CollisionPrimitives,
             ProbeConfigurations = task.ProbeConfigurations,
             GlobalSafetyPlane = task.GlobalSafetyPlane,
             PathOptimizationStrategy = task.PathOptimizationStrategy,
@@ -103,8 +115,8 @@ internal sealed class DefaultSafePathPlanner : ISafePathPlanner
             var safeAbove = (point.X, point.Y, safeZ);
             var approach = OffsetAlongNormal(measure, normal, approachDistance);
 
-            if (index == 0)
-                AddMovement(steps, ref previous, sourceStep, safeAbove, isFirstFeature ? "Move to safety plane" : "Move to feature safety plane", safetyPlane);
+            if (isFirstFeature && index == 0)
+                AddMovement(steps, ref previous, sourceStep, safeAbove, "Move to safety plane", safetyPlane);
 
             var approachName = !isFirstFeature && index == 0
                 ? $"Move to {ResolveFeaturePathName(sourceStep)} entry approach point"
@@ -113,9 +125,6 @@ internal sealed class DefaultSafePathPlanner : ISafePathPlanner
             AddMeasurement(steps, ref previous, sourceStep, point);
             AddMovement(steps, ref previous, sourceStep, approach, "Return to approach point", safetyPlane);
         }
-
-        var lastPoint = points[^1];
-        AddMovement(steps, ref previous, sourceStep, (lastPoint.X, lastPoint.Y, safeZ), "Retract to feature safety plane", safetyPlane);
     }
 
     private static void AddContinuousFeaturePath(
@@ -137,7 +146,8 @@ internal sealed class DefaultSafePathPlanner : ISafePathPlanner
         var firstSafeAbove = (firstPoint.X, firstPoint.Y, safeZ);
         var firstApproach = OffsetAlongNormal(firstMeasure, firstNormal, firstApproachDistance);
 
-        AddMovement(steps, ref previous, sourceStep, firstSafeAbove, isFirstFeature ? $"Move to {featureName} safety plane" : $"Move to {featureName} safety plane", safetyPlane);
+        if (isFirstFeature)
+            AddMovement(steps, ref previous, sourceStep, firstSafeAbove, $"Move to {featureName} safety plane", safetyPlane);
 
         var entryName = isFirstFeature
             ? $"Enter {featureName} measurement path"
@@ -158,8 +168,7 @@ internal sealed class DefaultSafePathPlanner : ISafePathPlanner
             AddMovement(steps, ref previous, sourceStep, approach, "Return to approach point", safetyPlane);
         }
 
-        var lastPoint = points[^1];
-        AddMovement(steps, ref previous, sourceStep, (lastPoint.X, lastPoint.Y, safeZ), $"Retract {featureName} to safety plane", safetyPlane);
+        AddMovement(steps, ref previous, sourceStep, previous ?? firstApproach, $"Exit {featureName} measurement path", safetyPlane);
     }
 
     private static void AddMeasurement(
@@ -224,67 +233,21 @@ internal sealed class DefaultSafePathPlanner : ISafePathPlanner
             NewProbe = source.NewProbe,
             LightingInfo = source.LightingInfo,
             TravelDistanceMm = source.TravelDistanceMm,
-            EstimatedTimeSeconds = source.EstimatedTimeSeconds,
-            RequiresManualGoto = source.RequiresManualGoto,
-            IsCollisionRisk = source.IsCollisionRisk,
-            CollisionReason = source.CollisionReason
+            EstimatedTimeSeconds = source.EstimatedTimeSeconds
         };
     }
 
     private static double ResolveSafetyZ(MeasurementTask task, MeasurementPlanOptions options)
     {
-        var maxZ = (task.CollisionPrimitives.Count > 0
-                ? task.CollisionPrimitives.SelectMany(EnumeratePrimitiveZValues)
-                : task.Steps.SelectMany(step => step.MeasurementPoints ?? []).Select(point => point.Z))
+        if (task.GlobalSafetyPlane is not null)
+            return task.GlobalSafetyPlane.GetPosition().Z;
+
+        var maxZ = task.Steps
+            .SelectMany(step => step.MeasurementPoints ?? [])
+            .Select(point => point.Z)
             .DefaultIfEmpty(0)
             .Max();
-        var probe = task.ProbeConfigurations.FirstOrDefault();
-        var probeClearance = probe is Probe concrete
-            ? Math.Max(concrete.TipLength, concrete.TipDiameter * 0.5)
-            : 0;
-        return Math.Max(task.GlobalSafetyPlane?.GetPosition().Z ?? double.NegativeInfinity, maxZ)
-            + probeClearance
-            + options.SafetyClearanceMm
-            + options.CollisionSafetyMarginMm
-            + options.AutoSafeGotoExtraClearanceMm;
-    }
-
-    private static IEnumerable<double> EnumeratePrimitiveZValues(Primitive primitive)
-    {
-        yield return primitive.GetRepresentativePoint().Z;
-
-        switch (primitive)
-        {
-            case CylinderPrimitive cylinder:
-                var axis = Normalize(cylinder.AxisDirX, cylinder.AxisDirY, cylinder.AxisDirZ);
-                var halfLength = cylinder.Length is > 0
-                    ? cylinder.Length.Value / 2
-                    : Math.Max(cylinder.Radius, Math.Sqrt(cylinder.SourceAreaMm2 ?? 0) /
-                        Math.Max(cylinder.Radius * Math.PI * 2, 1)) / 2;
-                yield return cylinder.AxisPointZ + axis.Z * halfLength + cylinder.Radius;
-                yield return cylinder.AxisPointZ - axis.Z * halfLength + cylinder.Radius;
-                break;
-            case SpherePrimitive sphere:
-                yield return sphere.CenterZ + sphere.Radius;
-                break;
-            case CirclePrimitive circle:
-                yield return circle.CenterZ + Math.Abs(circle.NormalZ) * circle.Radius;
-                break;
-            case ArcPrimitive arc:
-                yield return arc.CenterZ + Math.Abs(arc.NormalZ) * arc.Radius;
-                break;
-            case Surface3DPrimitive surface:
-                foreach (var vertex in surface.Vertices)
-                    yield return vertex.Z;
-                break;
-            case ConePrimitive cone:
-                if (cone.AxisStartZ is not null)
-                    yield return cone.AxisStartZ.Value + Math.Abs(cone.AxisDirZ) * (cone.RadiusStart ?? cone.RefRadius ?? 0);
-                if (cone.AxisEndZ is not null)
-                    yield return cone.AxisEndZ.Value + Math.Abs(cone.AxisDirZ) * (cone.RadiusEnd ?? cone.RefRadius ?? 0);
-                yield return cone.ApexZ;
-                break;
-        }
+        return maxZ + options.SafetyClearanceMm;
     }
 
     private static (double X, double Y, double Z) OffsetAlongNormal(
