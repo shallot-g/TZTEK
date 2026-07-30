@@ -8,7 +8,11 @@ builder.Services.Configure<FormOptions>(options =>
     options.MultipartBodyLengthLimit = 512 * 1024 * 1024;
 });
 builder.Services.AddSingleton<DemoSessionService>();
-builder.Services.AddHttpClient<IDrawingAssistClient, VolcengineDrawingAssistClient>();
+builder.Services.AddHttpClient<VolcengineDrawingAssistClient>();
+builder.Services.AddHttpClient<OpenAiDrawingAssistClient>();
+builder.Services.AddTransient<IDrawingAssistProvider>(service => service.GetRequiredService<VolcengineDrawingAssistClient>());
+builder.Services.AddTransient<IDrawingAssistProvider>(service => service.GetRequiredService<OpenAiDrawingAssistClient>());
+builder.Services.AddTransient<IDrawingAssistClient, DrawingAssistClientSelector>();
 builder.Services.AddCors(options =>
 {
     options.AddDefaultPolicy(policy => policy
@@ -103,10 +107,27 @@ app.MapDelete("/api/demo/sessions/{id}/drawing", (string id, DemoSessionService 
     catch (KeyNotFoundException ex) { return Results.NotFound(new { error = ex.Message }); }
 });
 
-app.MapPost("/api/demo/sessions/{id}/drawing-assist", async (string id, DemoSessionService service, CancellationToken ct) =>
+app.MapGet("/api/demo/drawing-assist/providers", (IDrawingAssistClient client) => Results.Ok(client.GetProviders()));
+
+app.MapPost("/api/demo/sessions/{id}/drawing-assist", async (string id, HttpRequest request, DemoSessionService service, CancellationToken ct) =>
 {
-    try { return Results.Ok(await service.RunDrawingAssistAsync(id, ct)); }
+    try
+    {
+        DrawingAssistRequest? options = null;
+        if (request.ContentLength.GetValueOrDefault() > 0)
+        {
+            if (!request.HasJsonContentType())
+                return Results.BadRequest(new { error = "AI 供应商参数必须使用 application/json。" });
+            options = await request.ReadFromJsonAsync<DrawingAssistRequest>(cancellationToken: ct);
+        }
+        var provider = options?.Provider ?? "volcengine";
+        if (!provider.Equals("volcengine", StringComparison.OrdinalIgnoreCase)
+            && !provider.Equals("openai", StringComparison.OrdinalIgnoreCase))
+            return Results.BadRequest(new { error = $"不支持的 AI 供应商：{provider}。可选值为 volcengine 或 openai。" });
+        return Results.Ok(await service.RunDrawingAssistAsync(id, provider, ct));
+    }
     catch (KeyNotFoundException ex) { return Results.NotFound(new { error = ex.Message }); }
+    catch (ArgumentException ex) { return Results.BadRequest(new { error = ex.Message }); }
     catch (InvalidOperationException ex) { return Results.BadRequest(new { error = ex.Message }); }
 });
 

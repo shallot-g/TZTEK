@@ -7,13 +7,29 @@ using TZTEK.VispecCMM.Demo.Api.Models;
 
 namespace TZTEK.VispecCMM.Demo.Api.Services;
 
-public sealed class VolcengineDrawingAssistClient : IDrawingAssistClient
+public sealed class VolcengineDrawingAssistClient : IDrawingAssistProvider
 {
     private const string PromptVersion = "drawing-assist-v4-no-thinking";
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private readonly HttpClient _httpClient;
     private readonly ILogger<VolcengineDrawingAssistClient> _logger;
     private readonly PdfPageRenderer _renderer = new();
+
+    public string Provider => "volcengine";
+
+    public DrawingAssistProviderInfo GetInfo()
+    {
+        var configured = !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("ARK_API_KEY"))
+            && !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("ARK_VISION_ENDPOINT_ID"));
+        return new DrawingAssistProviderInfo
+        {
+            Id = Provider,
+            DisplayName = "豆包",
+            IsConfigured = configured,
+            Model = Environment.GetEnvironmentVariable("ARK_VISION_ENDPOINT_ID") ?? "Doubao Vision",
+            UnavailableReason = configured ? null : "后端未配置 ARK_API_KEY 或 ARK_VISION_ENDPOINT_ID"
+        };
+    }
 
     public VolcengineDrawingAssistClient(HttpClient httpClient, ILogger<VolcengineDrawingAssistClient> logger)
     {
@@ -94,6 +110,7 @@ public sealed class VolcengineDrawingAssistClient : IDrawingAssistClient
             .ToList();
         return new DrawingAssistModelResult
         {
+            Provider = Provider,
             TargetCount = targetCount,
             Recommendations = merged,
             RequestId = string.Join(",", requestIds),
@@ -192,6 +209,7 @@ public sealed class VolcengineDrawingAssistClient : IDrawingAssistClient
             var successDiagnostic = CreateDiagnostic(page, endpoint, response.StatusCode, root, requestId, stopwatch.ElapsedMilliseconds, true, content.Length, pageRunId, pdfHash, imageHash, startedAt);
             return new DrawingAssistModelResult
             {
+                Provider = Provider,
                 TargetCount = result.TargetCount,
                 Recommendations = result.Recommendations,
                 RequestId = result.RequestId,
@@ -211,7 +229,7 @@ public sealed class VolcengineDrawingAssistClient : IDrawingAssistClient
         }
     }
 
-    private static string BuildPrompt(IReadOnlyList<VisualizationFeatureDto> features)
+    internal static string BuildPrompt(IReadOnlyList<VisualizationFeatureDto> features)
     {
         var descriptors = features.Select(feature => new
         {
@@ -234,7 +252,7 @@ public sealed class VolcengineDrawingAssistClient : IDrawingAssistClient
             + JsonSerializer.Serialize(descriptors, JsonOptions);
     }
 
-    private static string ExtractResponseText(JsonElement root)
+    internal static string ExtractResponseText(JsonElement root)
     {
         if (root.TryGetProperty("output_text", out var outputText))
             return ReadTextValue(outputText);
@@ -294,6 +312,7 @@ public sealed class VolcengineDrawingAssistClient : IDrawingAssistClient
         var incomplete = isObject && root.TryGetProperty("incomplete_details", out var incompleteValue) ? incompleteValue.ToString() : null;
         return new DrawingAssistPageDiagnostic
         {
+            Provider = "volcengine",
             RunId = runId ?? string.Empty, PdfHash = pdfHash ?? string.Empty, ImageHash = imageHash ?? string.Empty, PromptVersion = PromptVersion,
             PageNumber = page.PageNumber, HttpStatusCode = status is null ? null : (int)status.Value, RequestId = requestId,
             Model = model, ResponseFields = fields, OutputCount = outputCount, ChoicesCount = choicesCount,
@@ -306,13 +325,13 @@ public sealed class VolcengineDrawingAssistClient : IDrawingAssistClient
 
     private static string? ReadString(JsonElement root, string name) => root.ValueKind == JsonValueKind.Object && root.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
     private static long? ReadLong(JsonElement root, string name) => root.ValueKind == JsonValueKind.Object && root.TryGetProperty(name, out var value) && value.TryGetInt64(out var result) ? result : null;
-    private static async Task<string> ComputeHashAsync(string path, CancellationToken ct)
+    internal static async Task<string> ComputeHashAsync(string path, CancellationToken ct)
     {
         await using var stream = File.OpenRead(path);
         return Convert.ToHexString(await SHA256.HashDataAsync(stream, ct)).ToLowerInvariant();
     }
 
-    private static JsonElement TryParseJson(string body)
+    internal static JsonElement TryParseJson(string body)
     {
         try
         {
@@ -333,7 +352,7 @@ public sealed class VolcengineDrawingAssistClient : IDrawingAssistClient
         return $"豆包整页图像请求失败（HTTP {(int)statusCode}）：{snippet}";
     }
 
-    private static DrawingAssistModelResult ParseModelResult(string content, IReadOnlyList<VisualizationFeatureDto> features, string? requestId, int defaultPageNumber)
+    internal static DrawingAssistModelResult ParseModelResult(string content, IReadOnlyList<VisualizationFeatureDto> features, string? requestId, int defaultPageNumber)
     {
         var json = ExtractJsonPayload(content);
         using var document = JsonDocument.Parse(json);
@@ -404,5 +423,5 @@ public sealed class VolcengineDrawingAssistClient : IDrawingAssistClient
         }
     }
 
-    private static string TrimForDiagnostic(string value) => value.Length <= 500 ? value : value[..500] + "...";
+    internal static string TrimForDiagnostic(string value) => value.Length <= 500 ? value : value[..500] + "...";
 }

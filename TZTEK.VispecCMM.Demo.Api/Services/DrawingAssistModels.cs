@@ -4,6 +4,7 @@ using TZTEK.VispecCMM.Demo.Api.Models;
 
 public sealed class DrawingAssistResponse
 {
+    public string Provider { get; init; } = string.Empty;
     public string Status { get; init; } = "Completed";
     public string Message { get; init; } = string.Empty;
     public int Progress { get; init; } = 100;

@@ -145,7 +145,7 @@ public sealed class DemoSessionService
         entry.Dto.AiRecommendations = [];
     }
 
-    public async Task<DrawingAssistResponse> RunDrawingAssistAsync(string id, CancellationToken ct)
+    public async Task<DrawingAssistResponse> RunDrawingAssistAsync(string id, string provider, CancellationToken ct)
     {
         if (!_sessions.TryGetValue(id, out var entry) || entry.Import is null)
             throw new KeyNotFoundException("演示会话不存在、已过期或尚未完成 STEP 导入。");
@@ -161,6 +161,7 @@ public sealed class DemoSessionService
         {
             var features = entry.Dto.Result?.Features ?? [];
             var model = await _drawingAssistClient.AnalyzeAsync(
+                provider,
                 entry.DrawingPath,
                 features,
                 update =>
@@ -187,12 +188,14 @@ public sealed class DemoSessionService
                 .ToList();
             entry.Dto.DrawingAssistStatus = "Completed";
             entry.Dto.DrawingAssistProgress = 100;
+            var providerName = model.Provider.Equals("openai", StringComparison.OrdinalIgnoreCase) ? "GPT-5.6" : "豆包";
             return new DrawingAssistResponse
             {
+                Provider = model.Provider,
                 Status = "Completed",
                 Message = model.Warnings.Count == 0
-                    ? "豆包已完成整页图纸与 STEP 基元推荐，请审核自动勾选结果。"
-                    : $"豆包已完成部分页面识别，存在 {model.Warnings.Count} 条警告，请审核推荐结果。",
+                    ? $"{providerName} 已完成整页图纸与 STEP 基元推荐，请审核自动勾选结果。"
+                    : $"{providerName} 已完成部分页面识别，存在 {model.Warnings.Count} 条警告，请审核推荐结果。",
                 Progress = 100,
                 TargetCount = model.TargetCount,
                 RecommendedCount = recommendations.Count,

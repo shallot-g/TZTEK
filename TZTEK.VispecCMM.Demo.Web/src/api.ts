@@ -1,4 +1,4 @@
-import type { DemoExample, DemoSession, DrawingAssistResult, DrawingFile } from './types'
+import type { DemoExample, DemoSession, DrawingAssistProvider, DrawingAssistProviderId, DrawingAssistResult, DrawingFile } from './types'
 
 async function readJson<T>(response: Response): Promise<T> {
   const payload = await response.json()
@@ -60,6 +60,12 @@ export async function deleteDrawing(id: string): Promise<void> {
   if (!response.ok) await readJson(response)
 }
 
-export async function startDrawingAssist(id: string): Promise<DrawingAssistResult> {
-  return readJson(await fetch(`/api/demo/sessions/${id}/drawing-assist`, { method: 'POST' }))
+export async function getDrawingAssistProviders(): Promise<DrawingAssistProvider[]> {
+  return readJson(await fetch('/api/demo/drawing-assist/providers'))
+}
+
+export async function startDrawingAssist(id: string, provider: DrawingAssistProviderId = 'volcengine'): Promise<DrawingAssistResult> {
+  return readJson(await fetch(`/api/demo/sessions/${id}/drawing-assist`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ provider }),
+  }))
 }
