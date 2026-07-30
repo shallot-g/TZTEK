@@ -271,8 +271,9 @@ public sealed class DemoSessionService
                 ?? throw new InvalidOperationException("所选基元未能生成测量任务。");
             entry.Dto.Result = VisualizationMapper.Map(entry.Dto.Id, import, new MeasurementTask(), task, entry.ModelPath is not null);
             entry.Dto.Status = "Completed";
-            entry.Dto.WorkflowStage = "PathReady";
-            entry.Dto.Stage = "测量路径已生成";
+            var hasCollisionRisk = task.Steps.Any(step => !step.IsExecutable || step.IsCollisionRisk);
+            entry.Dto.WorkflowStage = hasCollisionRisk ? "PathReadyWithCollisionRisk" : "PathReady";
+            entry.Dto.Stage = hasCollisionRisk ? "路径已生成，但存在不可执行的碰撞风险段" : "测量路径已生成";
             entry.Dto.Progress = 100;
             return entry.Dto;
         }

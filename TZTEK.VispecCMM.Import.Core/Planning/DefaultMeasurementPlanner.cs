@@ -100,6 +100,9 @@ internal sealed class DefaultMeasurementPlanner : IMeasurementPlanner
             ToleranceStandard = options.ToleranceStandard,
             LengthUnit = options.Unit,
             Steps = steps,
+            CollisionPrimitives = options.CollisionPrimitives.Count > 0
+                ? options.CollisionPrimitives
+                : candidates.Select(item => item.Primitive).ToList(),
             ProbeConfigurations = assignedProbes,
             GlobalSafetyPlane = CreateSafetyPlane(allPoints, preset),
             PathOptimizationStrategy = options.PathStrategy,

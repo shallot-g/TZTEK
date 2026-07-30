@@ -25,7 +25,9 @@ public sealed class MeasurementPlanOptions
     public bool EnableAutoGlobalSafeGoto { get; set; } = true;
     public bool EnableInterFeatureAutoGoto { get; set; } = true;
     public bool EnablePrimitiveNarrowPhaseCollisionCheck { get; set; } = true;
+    public bool TreatProbeAsPoint { get; set; } = true;
     public IReadOnlyList<GotoPoint> UserGotoPoints { get; set; } = [];
+    public IReadOnlyList<Primitive> CollisionPrimitives { get; set; } = [];
     public double CollisionSafetyMarginMm { get; set; } = 2.0;
     public double AutoSafeGotoExtraClearanceMm { get; set; } = 5.0;
     public ToleranceStandard ToleranceStandard { get; set; } = ToleranceStandard.ASME;

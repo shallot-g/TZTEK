@@ -139,11 +139,10 @@ internal static class VisualizationMapper
                 MovementCount = task.Steps.Count(step => step.StepType == MeasurementStepType.Movement),
                 MeasurementCount = measurementSteps.Count,
                 GotoCount = task.Steps.Count(step => step.GotoTarget is not null),
-                AutoGotoCount = task.Steps.Count(step =>
-                    step.Name.Contains("Auto global safe GOTO", StringComparison.OrdinalIgnoreCase)
-                    || step.Name.Contains("Auto inter-feature GOTO", StringComparison.OrdinalIgnoreCase)
-                    || step.Name.Contains("Auto intra-feature GOTO", StringComparison.OrdinalIgnoreCase)),
-                ManualGotoCount = task.Steps.Count(step => step.GotoTarget?.Reason.Contains("manual GOTO", StringComparison.OrdinalIgnoreCase) == true),
+                AutoGotoCount = task.Steps.Count(step => step.CollisionValidated && step.MovementKind == "SafePlaneTraverse"),
+                ManualGotoCount = task.Steps.Count(step => step.RequiresManualGoto),
+                CollisionRiskCount = task.Steps.Count(step => step.IsCollisionRisk),
+                UnexecutableCount = task.Steps.Count(step => !step.IsExecutable),
                 TotalPathLengthMm = task.TotalPathLengthMm,
                 EstimatedTimeSeconds = task.EstimatedTotalTimeSeconds
             }
@@ -154,30 +153,16 @@ internal static class VisualizationMapper
     {
         var result = new List<VisualizationPathSegmentDto>();
         (double X, double Y, double Z)? previous = null;
-        (double X, double Y, double Z)? previousApproach = null;
 
         foreach (var step in task.Steps)
         {
             if (step.StepType == MeasurementStepType.Movement && step.GotoTarget is not null)
             {
                 var end = (step.GotoTarget.X, step.GotoTarget.Y, step.GotoTarget.Z);
-                var isApproachTransit = IsApproachToApproachTransit(step);
-                var start = isApproachTransit && previousApproach is not null
-                    ? previousApproach.Value
-                    : previous;
+                var start = previous;
 
                 if (start is not null)
                     result.Add(MapSegment(step, start.Value, end, "Movement"));
-
-                if (step.Name.Contains("Return to approach point", StringComparison.OrdinalIgnoreCase))
-                    previousApproach = end;
-                else if (isApproachTransit)
-                    previousApproach = end;
-                else if (step.Name.Contains("Enter", StringComparison.OrdinalIgnoreCase)
-                    && step.Name.Contains("measurement path", StringComparison.OrdinalIgnoreCase))
-                    previousApproach = end;
-                else if (!step.Name.Contains("measurement path", StringComparison.OrdinalIgnoreCase))
-                    previousApproach = null;
 
                 previous = end;
                 continue;
@@ -216,11 +201,14 @@ internal static class VisualizationMapper
         string kind)
     {
         var reason = step.GotoTarget?.Reason;
-        var isAuto = step.Name.Contains("Auto global safe GOTO", StringComparison.OrdinalIgnoreCase)
+        var isAuto = step.CollisionValidated && step.MovementKind is
+                "FeatureRetract" or "SafeEnvelopeExit" or "SafePlaneLift" or
+                "SafePlaneTraverse" or "SafeEnvelopeEntry" or "FeatureApproach"
+            || step.Name.Contains("Auto global safe GOTO", StringComparison.OrdinalIgnoreCase)
             || step.Name.Contains("Auto inter-feature GOTO", StringComparison.OrdinalIgnoreCase)
             || step.Name.Contains("Auto intra-feature GOTO", StringComparison.OrdinalIgnoreCase);
         var isGoto = step.GotoTarget is not null && (isAuto || step.Name.Contains("GOTO", StringComparison.OrdinalIgnoreCase));
-        var risk = reason?.Contains("manual GOTO", StringComparison.OrdinalIgnoreCase) == true
+        var risk = step.IsCollisionRisk || reason?.Contains("manual GOTO", StringComparison.OrdinalIgnoreCase) == true
             || reason?.Contains("collision risk", StringComparison.OrdinalIgnoreCase) == true
             || reason?.Contains("passes through", StringComparison.OrdinalIgnoreCase) == true
             || reason?.Contains("Inter-feature transit has", StringComparison.OrdinalIgnoreCase) == true
@@ -236,7 +224,11 @@ internal static class VisualizationMapper
             IsGoto = isGoto,
             IsAutoGoto = isAuto,
             HasRisk = risk,
-            Reason = reason,
+            IsExecutable = step.IsExecutable,
+            RequiresManualGoto = step.RequiresManualGoto,
+            CollisionValidated = step.CollisionValidated,
+            MovementKind = step.MovementKind,
+            Reason = step.CollisionReason ?? reason,
             DistanceMm = Distance(start, end)
         };
     }
@@ -272,12 +264,20 @@ internal static class VisualizationMapper
                 Message = "未生成工件 STL 外壳，视图将使用基元近似显示。"
             };
         }
-        if (task.Steps.Any(step => step.GotoTarget?.Reason.Contains("manual GOTO", StringComparison.OrdinalIgnoreCase) == true))
+        if (task.Steps.Any(step => step.RequiresManualGoto))
         {
             yield return new VisualizationWarningDto
             {
                 Level = "Warning",
                 Message = "部分路径需要人工设置安全 GOTO 点。"
+            };
+        }
+        if (task.Steps.Any(step => !step.IsExecutable))
+        {
+            yield return new VisualizationWarningDto
+            {
+                Level = "Warning",
+                Message = "路径包含不可执行的碰撞风险段；红色风险线仅用于定位，探针动画不会沿该段移动。"
             };
         }
         if (task.Steps.Any(step => step.TargetItem?.Primitive is CylinderPrimitive))

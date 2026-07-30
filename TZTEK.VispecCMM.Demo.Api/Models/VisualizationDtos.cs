@@ -137,6 +137,10 @@ public sealed record VisualizationPathSegmentDto
     public bool IsGoto { get; init; }
     public bool IsAutoGoto { get; init; }
     public bool HasRisk { get; init; }
+    public bool IsExecutable { get; init; } = true;
+    public bool RequiresManualGoto { get; init; }
+    public bool CollisionValidated { get; init; }
+    public string MovementKind { get; init; } = string.Empty;
     public string? Reason { get; init; }
     public double DistanceMm { get; init; }
 }
@@ -151,6 +155,8 @@ public sealed class VisualizationStatisticsDto
     public int GotoCount { get; init; }
     public int AutoGotoCount { get; init; }
     public int ManualGotoCount { get; init; }
+    public int CollisionRiskCount { get; init; }
+    public int UnexecutableCount { get; init; }
     public double TotalPathLengthMm { get; init; }
     public double EstimatedTimeSeconds { get; init; }
 }

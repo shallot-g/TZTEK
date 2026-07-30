@@ -69,11 +69,13 @@ internal sealed class DefaultCollisionChecker : ICollisionChecker
         MeasurementStep movementStep,
         MeasurementPlanOptions options)
     {
-        var margin = ResolveProbeRadius(movementStep) + Math.Max(0, options.CollisionSafetyMarginMm);
+        var margin = (options.TreatProbeAsPoint ? 0 : ResolveProbeRadius(movementStep))
+            + Math.Max(0, options.CollisionSafetyMarginMm);
         var target = movementStep.TargetItem?.Primitive;
-        return task.Steps
-            .Select(step => step.TargetItem?.Primitive)
-            .OfType<Primitive>()
+        var candidates = task.CollisionPrimitives.Count > 0
+            ? task.CollisionPrimitives
+            : task.Steps.Select(step => step.TargetItem?.Primitive).OfType<Primitive>();
+        return candidates
             .Where(primitive => !ShouldExcludePrimitive(target, primitive, movementStep))
             .DistinctBy(primitive => primitive.Id)
             .Select(primitive => TryBuildBox(primitive, margin))
@@ -98,6 +100,9 @@ internal sealed class DefaultCollisionChecker : ICollisionChecker
         if (target is CylinderPrimitive targetCylinder && candidate is CylinderPrimitive candidateCylinder)
         {
             if (targetCylinder.SourceElementIds.Contains(candidate.SourceElementId, StringComparer.OrdinalIgnoreCase))
+                return true;
+
+            if (targetCylinder.IsInnerSurface == true && ShareCylinderAxis(targetCylinder, candidateCylinder))
                 return true;
 
             if (AreCoaxialCylinders(targetCylinder, candidateCylinder))
@@ -136,6 +141,11 @@ internal sealed class DefaultCollisionChecker : ICollisionChecker
         if (Math.Abs(left.Radius - right.Radius) > 0.05)
             return false;
 
+        return ShareCylinderAxis(left, right);
+    }
+
+    private static bool ShareCylinderAxis(CylinderPrimitive left, CylinderPrimitive right)
+    {
         var leftAxis = Normalize((left.AxisDirX, left.AxisDirY, left.AxisDirZ));
         var rightAxis = Normalize((right.AxisDirX, right.AxisDirY, right.AxisDirZ));
         if (Math.Abs(Dot(leftAxis, rightAxis)) < 0.995)
@@ -304,7 +314,8 @@ internal sealed class DefaultCollisionChecker : ICollisionChecker
         if (!IsApproachToApproachTransit(movementStep))
             return false;
 
-        var margin = ResolveProbeRadius(movementStep) + Math.Max(0, options.CollisionSafetyMarginMm);
+        var margin = (options.TreatProbeAsPoint ? 0 : ResolveProbeRadius(movementStep))
+            + Math.Max(0, options.CollisionSafetyMarginMm);
         var collisions = new List<CollisionEvent>();
 
         foreach (var primitive in EnumerateTransitObstaclePrimitives(task, movementStep))
@@ -349,9 +360,9 @@ internal sealed class DefaultCollisionChecker : ICollisionChecker
         MeasurementTask task,
         MeasurementStep movementStep)
     {
-        var primitives = task.Steps
-            .Select(step => step.TargetItem?.Primitive)
-            .OfType<Primitive>()
+        var primitives = (task.CollisionPrimitives.Count > 0
+                ? task.CollisionPrimitives
+                : task.Steps.Select(step => step.TargetItem?.Primitive).OfType<Primitive>())
             .DistinctBy(primitive => primitive.Id)
             .ToList();
 

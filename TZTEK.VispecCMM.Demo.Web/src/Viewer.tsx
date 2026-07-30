@@ -34,6 +34,7 @@ export default function Viewer({ result, plan, currentStep, selectedFeatureId, l
     controls: OrbitControls
     completed: THREE.LineSegments
     future: THREE.LineSegments
+    risk: THREE.LineSegments
     active: THREE.Line
     probe: THREE.Group
     featureObjects: THREE.Object3D[]
@@ -118,8 +119,9 @@ export default function Viewer({ result, plan, currentStep, selectedFeatureId, l
 
     const completed = lineSegments(0x7ad8ca, 0.95)
     const future = lineSegments(0x47525e, 0.35)
+    const risk = dashedLineSegments(colors.risk, 0.9)
     const active = new THREE.Line(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({ color: 0xffffff }))
-    scene.add(completed, future, active)
+    scene.add(completed, future, risk, active)
 
     if (layers.safety) {
       const safetyZ = Math.max(
@@ -185,7 +187,7 @@ export default function Viewer({ result, plan, currentStep, selectedFeatureId, l
       renderer.render(scene, camera)
       stateRef.current!.frame = requestAnimationFrame(animate)
     }
-    stateRef.current = { renderer, scene, camera, controls, completed, future, active, probe, featureObjects, frame: 0 }
+    stateRef.current = { renderer, scene, camera, controls, completed, future, risk, active, probe, featureObjects, frame: 0 }
     animate()
 
     return () => {
@@ -214,8 +216,10 @@ export default function Viewer({ result, plan, currentStep, selectedFeatureId, l
     if (!state) return
     const index = Math.min(Math.max(currentStep, 0), Math.max(plan.segments.length - 1, 0))
     const visibleSegments = (segments: PathPlan['segments']) => layers.goto ? segments : segments.filter(segment => !segment.isGoto)
-    updateLineSegments(state.completed, visibleSegments(plan.segments.slice(0, index)), true)
-    updateLineSegments(state.future, visibleSegments(plan.segments.slice(index + 1)), false)
+    const executable = (segments: PathPlan['segments']) => visibleSegments(segments).filter(segment => segment.isExecutable)
+    updateLineSegments(state.completed, executable(plan.segments.slice(0, index)), true)
+    updateLineSegments(state.future, executable(plan.segments.slice(index + 1)), false)
+    updateRiskSegments(state.risk, visibleSegments(plan.segments.filter(segment => !segment.isExecutable)))
     const segment = plan.segments[index]
     if (segment) {
       const geometry = new THREE.BufferGeometry().setFromPoints([
@@ -225,13 +229,14 @@ export default function Viewer({ result, plan, currentStep, selectedFeatureId, l
       state.active.geometry.dispose()
       state.active.geometry = geometry
       ;(state.active.material as THREE.LineBasicMaterial).color.setHex(segment.hasRisk ? colors.risk : segment.isGoto ? colors.goto : segment.kind === 'Measurement' ? colors.measurement : colors.selected)
-      state.probe.position.set(...segment.end)
+      state.probe.position.set(...(segment.isExecutable ? segment.end : segment.start))
       state.probe.visible = true
     } else {
       state.probe.visible = false
     }
     state.completed.visible = layers.path
     state.future.visible = layers.path
+    state.risk.visible = layers.path
     state.active.visible = layers.path && (layers.goto || !segment?.isGoto)
   }, [currentStep, plan, layers.path, layers.goto])
 
@@ -260,6 +265,22 @@ function lineSegments(color: number, opacity: number) {
     new THREE.BufferGeometry(),
     new THREE.LineBasicMaterial({ color, transparent: true, opacity }),
   )
+}
+
+function dashedLineSegments(color: number, opacity: number) {
+  return new THREE.LineSegments(
+    new THREE.BufferGeometry(),
+    new THREE.LineDashedMaterial({ color, transparent: true, opacity, dashSize: 3, gapSize: 2 }),
+  )
+}
+
+function updateRiskSegments(object: THREE.LineSegments, segments: PathPlan['segments']) {
+  const vertices = segments.flatMap(segment => [...segment.start, ...segment.end])
+  const geometry = new THREE.BufferGeometry()
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3))
+  object.geometry.dispose()
+  object.geometry = geometry
+  object.computeLineDistances()
 }
 
 function updateLineSegments(object: THREE.LineSegments, segments: PathPlan['segments'], completed: boolean) {

@@ -30,10 +30,7 @@ internal sealed class DefaultPathCollisionResolver : IPathCollisionResolver
             }
 
             var target = ToPoint(step.GotoTarget);
-            var isApproachTransit = IsApproachToApproachTransit(step);
-            var collisionStart = isApproachTransit && previousApproach is not null
-                ? previousApproach.Value
-                : previous;
+            var collisionStart = previous;
 
             if (collisionStart is null || ShouldSkipCollisionCheck(step))
             {
@@ -49,8 +46,57 @@ internal sealed class DefaultPathCollisionResolver : IPathCollisionResolver
 
             if (!collision.HasCollision)
             {
+                step.CollisionValidated = true;
+                if (IsInterFeatureTransition(step))
+                    step.MovementKind = "DirectTransition";
                 AddMovement(resolvedSteps, ref previous, step, target);
                 UpdateApproachTracking(step, target, ref previousApproach);
+                continue;
+            }
+
+            if (IsInterFeatureTransition(step))
+            {
+                if (TryCreateValidatedSafePlanePath(
+                    task,
+                    collisionStart.Value,
+                    target,
+                    step,
+                    options,
+                    segmentIndex,
+                    resolvedSteps,
+                    ref previous,
+                    out var safePathFailure))
+                {
+                    UpdateApproachTracking(step, target, ref previousApproach);
+                    continue;
+                }
+
+                AddManualGotoRequiredMovement(
+                    resolvedSteps,
+                    ref previous,
+                    step,
+                    target,
+                    $"{BuildCollisionReason(collision)}; {safePathFailure}");
+                UpdateApproachTracking(step, target, ref previousApproach);
+                continue;
+            }
+
+            if (step.Name.Contains("Return to global safety plane", StringComparison.OrdinalIgnoreCase))
+            {
+                if (TryCreateValidatedFinalSafetyReturn(
+                    task,
+                    collisionStart.Value,
+                    step,
+                    options,
+                    segmentIndex,
+                    resolvedSteps,
+                    ref previous,
+                    out var returnFailure))
+                {
+                    continue;
+                }
+
+                AddManualGotoRequiredMovement(resolvedSteps, ref previous, step, target, returnFailure);
                 continue;
             }
 
@@ -104,7 +150,7 @@ internal sealed class DefaultPathCollisionResolver : IPathCollisionResolver
             UpdateApproachTracking(step, target, ref previousApproach);
         }
 
-        var totalLength = resolvedSteps.Sum(step => step.TravelDistanceMm ?? 0);
+        var totalLength = resolvedSteps.Where(step => step.IsExecutable).Sum(step => step.TravelDistanceMm ?? 0);
         return new MeasurementTask
         {
             TaskId = task.TaskId,
@@ -114,6 +160,7 @@ internal sealed class DefaultPathCollisionResolver : IPathCollisionResolver
             ToleranceStandard = task.ToleranceStandard,
             LengthUnit = task.LengthUnit,
             Steps = resolvedSteps,
+            CollisionPrimitives = task.CollisionPrimitives,
             ProbeConfigurations = task.ProbeConfigurations,
             GlobalSafetyPlane = task.GlobalSafetyPlane,
             PathOptimizationStrategy = task.PathOptimizationStrategy,
@@ -249,42 +296,242 @@ internal sealed class DefaultPathCollisionResolver : IPathCollisionResolver
         return IsApproachToApproachTransit(step);
     }
 
-    private static bool ShouldSkipCollisionCheck(MeasurementStep step)
+    private static bool ShouldSkipCollisionCheck(MeasurementStep step) => step.CollisionValidated;
+
+    private bool TryCreateValidatedSafePlanePath(
+        MeasurementTask task,
+        (double X, double Y, double Z) start,
+        (double X, double Y, double Z) target,
+        MeasurementStep sourceStep,
+        MeasurementPlanOptions options,
+        int segmentIndex,
+        List<MeasurementStep> resolvedSteps,
+        ref (double X, double Y, double Z)? previous,
+        out string failureReason)
     {
-        var name = step.Name;
-
-        if (name.Contains("Auto global safe GOTO", StringComparison.OrdinalIgnoreCase))
-            return true;
-
-        if (name.Contains("Auto inter-feature GOTO", StringComparison.OrdinalIgnoreCase))
-            return true;
-
-        if (name.Contains("Auto intra-feature GOTO", StringComparison.OrdinalIgnoreCase))
-            return true;
-
-        if (name.Contains("Return from inter-feature GOTO", StringComparison.OrdinalIgnoreCase))
-            return true;
-
-        if (name.Contains("Return from intra-feature GOTO", StringComparison.OrdinalIgnoreCase))
-            return true;
-
-        if (name.Contains("Enter", StringComparison.OrdinalIgnoreCase)
-            && name.Contains("measurement path", StringComparison.OrdinalIgnoreCase))
+        if (!options.EnableGotoAvoidance || !options.EnableAutoGlobalSafeGoto)
         {
+            failureReason = "automatic safety-plane transition is disabled";
+            return false;
+        }
+
+        var safeZ = ResolveAutoSafeZ(task, sourceStep, options);
+        if (!double.IsFinite(safeZ))
+        {
+            failureReason = "safety-plane height is invalid";
+            return false;
+        }
+
+        var clearance = ResolveTransitionClearance(sourceStep, options);
+        var previousFeatureStep = ResolvePreviousFeatureStep(task, sourceStep) ?? sourceStep;
+        var escapeTask = BuildEscapeCollisionTask(task, start, previousFeatureStep, options, segmentIndex);
+        var departureCandidates = BuildTransitionCandidates(
+                start,
+                ResolvePreviousFeatureDirection(task, sourceStep),
+                clearance,
+                options.DefaultRetractDistanceMm)
+            .Concat(BuildCylinderPortalCandidates(previousFeatureStep.TargetItem?.Primitive, clearance))
+            .Distinct()
+            .ToList();
+        var arrivalCandidates = BuildTransitionCandidates(
+                target,
+                ResolveFeatureDirection(task, sourceStep),
+                clearance,
+                options.DefaultApproachDistanceMm)
+            .Concat(BuildCylinderPortalCandidates(sourceStep.TargetItem?.Primitive, clearance))
+            .Distinct()
+            .ToList();
+        var workpieceBounds = ResolveWorkpieceBoundsXY(task, clearance);
+
+        ((double X, double Y, double Z) Point, MeasurementTask CheckTask, MeasurementStep CheckStep, string Kind, string Name)[]? route = null;
+        var lastFailure = "no collision-free safety-plane route candidate";
+        var directCandidates = departureCandidates.SelectMany(departure => arrivalCandidates.Select(arrival =>
+            (Departure: departure, DepartureSide: departure, Arrival: arrival, ArrivalSide: arrival, UseSideCorridor: false)));
+        var sideCandidates = departureCandidates
+            .SelectMany(departure => ResolveSidePoints(departure, workpieceBounds)
+                .SelectMany(departureSide => arrivalCandidates
+                    .SelectMany(arrival => ResolveSidePoints(arrival, workpieceBounds)
+                        .Select(arrivalSide => (Departure: departure, DepartureSide: departureSide, Arrival: arrival, ArrivalSide: arrivalSide, UseSideCorridor: true)))));
+        foreach (var candidate in directCandidates.Concat(sideCandidates)
+            .OrderBy(pair => Distance(start, pair.Departure)
+                + Distance(pair.Departure, pair.DepartureSide)
+                + Distance(pair.DepartureSide, WithZ(pair.DepartureSide, safeZ))
+                + Distance(WithZ(pair.DepartureSide, safeZ), WithZ(pair.ArrivalSide, safeZ))
+                + Distance(WithZ(pair.ArrivalSide, safeZ), pair.ArrivalSide)
+                + Distance(pair.ArrivalSide, pair.Arrival)
+                + Distance(pair.Arrival, target)))
+        {
+            var candidateRoute = candidate.UseSideCorridor
+                ? new[]
+                {
+                    (Point: candidate.Departure, CheckTask: escapeTask, CheckStep: previousFeatureStep, Kind: "FeatureRetract", Name: "Auto feature retract"),
+                    (Point: candidate.DepartureSide, CheckTask: task, CheckStep: previousFeatureStep, Kind: "SafeEnvelopeExit", Name: "Auto move to workpiece exterior"),
+                    (Point: WithZ(candidate.DepartureSide, safeZ), CheckTask: task, CheckStep: previousFeatureStep, Kind: "SafePlaneLift", Name: "Auto safety-plane lift"),
+                    (Point: WithZ(candidate.ArrivalSide, safeZ), CheckTask: task, CheckStep: sourceStep, Kind: "SafePlaneTraverse", Name: "Auto safety-plane traverse"),
+                    (Point: candidate.ArrivalSide, CheckTask: task, CheckStep: sourceStep, Kind: "SafeEnvelopeEntry", Name: "Auto descend outside workpiece"),
+                    (Point: candidate.Arrival, CheckTask: task, CheckStep: sourceStep, Kind: "FeatureApproach", Name: "Auto move to feature exterior"),
+                    (Point: target, CheckTask: task, CheckStep: sourceStep, Kind: "FeatureApproach", Name: "Auto enter next feature")
+                }
+                : new[]
+                {
+                    (Point: candidate.Departure, CheckTask: escapeTask, CheckStep: previousFeatureStep, Kind: "FeatureRetract", Name: "Auto feature retract"),
+                    (Point: WithZ(candidate.Departure, safeZ), CheckTask: task, CheckStep: previousFeatureStep, Kind: "SafePlaneLift", Name: "Auto safety-plane lift"),
+                    (Point: WithZ(candidate.Arrival, safeZ), CheckTask: task, CheckStep: sourceStep, Kind: "SafePlaneTraverse", Name: "Auto safety-plane traverse"),
+                    (Point: candidate.Arrival, CheckTask: task, CheckStep: sourceStep, Kind: "FeatureApproach", Name: "Auto move to feature exterior"),
+                    (Point: target, CheckTask: task, CheckStep: sourceStep, Kind: "FeatureApproach", Name: "Auto enter next feature")
+                };
+
+            var cursor = start;
+            var valid = true;
+            foreach (var leg in candidateRoute)
+            {
+                var check = _collisionChecker.Check(leg.CheckTask, cursor, leg.Point, leg.CheckStep, options, segmentIndex);
+                if (check.HasCollision)
+                {
+                    var ids = string.Join(", ", check.Collisions.SelectMany(item => item.InvolvedElementIds).Distinct().Take(5));
+                    lastFailure = $"{leg.Kind} collision{(string.IsNullOrWhiteSpace(ids) ? string.Empty : $" with {ids}")}";
+                    valid = false;
+                    break;
+                }
+                cursor = leg.Point;
+            }
+
+            if (valid)
+            {
+                route = candidateRoute;
+                break;
+            }
+        }
+
+        if (route is null)
+        {
+            failureReason = lastFailure;
+            return false;
+        }
+
+        foreach (var leg in route)
+        {
+            AddGeneratedMovement(
+                resolvedSteps,
+                ref previous,
+                sourceStep,
+                leg.Point,
+                leg.Name,
+                "Collision-free automatic safety-plane transition",
+                leg.Kind,
+                collisionValidated: true);
+        }
+
+        failureReason = string.Empty;
+        return true;
+    }
+
+    private bool TryCreateValidatedFinalSafetyReturn(
+        MeasurementTask task,
+        (double X, double Y, double Z) start,
+        MeasurementStep sourceStep,
+        MeasurementPlanOptions options,
+        int segmentIndex,
+        List<MeasurementStep> resolvedSteps,
+        ref (double X, double Y, double Z)? previous,
+        out string failureReason)
+    {
+        var safeZ = ResolveAutoSafeZ(task, sourceStep, options);
+        var clearance = ResolveTransitionClearance(sourceStep, options);
+        var candidates = BuildTransitionCandidates(
+            start,
+            ResolvePreviousFeatureDirection(task, sourceStep),
+            clearance,
+            options.DefaultRetractDistanceMm);
+        var lastFailure = "no collision-free final safety return";
+
+        foreach (var departure in candidates.OrderBy(point => Distance(start, point)))
+        {
+            var safeTarget = (departure.X, departure.Y, safeZ);
+            var retractCheck = _collisionChecker.Check(task, start, departure, sourceStep, options, segmentIndex);
+            if (retractCheck.HasCollision)
+            {
+                lastFailure = "final feature retract collides";
+                continue;
+            }
+
+            var liftCheck = _collisionChecker.Check(task, departure, safeTarget, sourceStep, options, segmentIndex);
+            if (liftCheck.HasCollision)
+            {
+                lastFailure = "final safety-plane lift collides";
+                continue;
+            }
+
+            AddGeneratedMovement(
+                resolvedSteps,
+                ref previous,
+                sourceStep,
+                departure,
+                "Auto final feature retract",
+                "Collision-free final feature retract",
+                "FeatureRetract",
+                collisionValidated: true);
+            AddGeneratedMovement(
+                resolvedSteps,
+                ref previous,
+                sourceStep,
+                safeTarget,
+                "Auto final safety-plane lift",
+                "Collision-free final safety-plane return",
+                "SafePlaneLift",
+                collisionValidated: true);
+            failureReason = string.Empty;
             return true;
         }
 
-        if (name.Contains("Exit", StringComparison.OrdinalIgnoreCase)
-            && name.Contains("measurement path", StringComparison.OrdinalIgnoreCase))
-        {
-            return true;
-        }
-
-        if (name.Contains("Return to approach point", StringComparison.OrdinalIgnoreCase))
-            return true;
-
+        failureReason = lastFailure;
         return false;
     }
+
+    private MeasurementTask BuildEscapeCollisionTask(
+        MeasurementTask task,
+        (double X, double Y, double Z) start,
+        MeasurementStep sourceStep,
+        MeasurementPlanOptions options,
+        int segmentIndex)
+    {
+        var candidates = task.CollisionPrimitives.Count > 0
+            ? task.CollisionPrimitives
+            : task.Steps.Select(step => step.TargetItem?.Primitive).OfType<Primitive>().DistinctBy(item => item.Id).ToList();
+        var obstacles = new List<Primitive>();
+        foreach (var primitive in candidates)
+        {
+            var singleObstacleTask = CloneCollisionContext(task, [primitive]);
+            var startsInside = _collisionChecker.Check(
+                singleObstacleTask,
+                start,
+                start,
+                sourceStep,
+                options,
+                segmentIndex).HasCollision;
+            if (!startsInside)
+                obstacles.Add(primitive);
+        }
+
+        return CloneCollisionContext(task, obstacles);
+    }
+
+    private static MeasurementTask CloneCollisionContext(
+        MeasurementTask task,
+        IReadOnlyList<Primitive> collisionPrimitives) => new()
+    {
+        TaskId = task.TaskId,
+        Name = task.Name,
+        SourceFilePath = task.SourceFilePath,
+        CreatedAt = task.CreatedAt,
+        ToleranceStandard = task.ToleranceStandard,
+        LengthUnit = task.LengthUnit,
+        Steps = [],
+        CollisionPrimitives = collisionPrimitives,
+        ProbeConfigurations = task.ProbeConfigurations,
+        GlobalSafetyPlane = task.GlobalSafetyPlane,
+        PathOptimizationStrategy = task.PathOptimizationStrategy
+    };
 
     private bool TryResolveInterFeatureCollision(
         MeasurementTask task,
@@ -516,7 +763,8 @@ internal sealed class DefaultPathCollisionResolver : IPathCollisionResolver
         List<MeasurementStep> steps,
         ref (double X, double Y, double Z)? previous,
         MeasurementStep sourceStep,
-        (double X, double Y, double Z) target)
+        (double X, double Y, double Z) target,
+        string? collisionReason = null)
     {
         var cloned = CloneStep(sourceStep, steps.Count + 1);
         cloned.Name = $"{sourceStep.Name} - Needs manual GOTO point";
@@ -536,6 +784,11 @@ internal sealed class DefaultPathCollisionResolver : IPathCollisionResolver
         };
         cloned.TravelDistanceMm = previous is null ? 0 : Distance(previous.Value, target);
         cloned.EstimatedTimeSeconds = cloned.TravelDistanceMm.Value / DefaultMachineSpeedMmPerSecond;
+        cloned.IsCollisionRisk = true;
+        cloned.RequiresManualGoto = true;
+        cloned.IsExecutable = false;
+        cloned.MovementKind = "CollisionRisk";
+        cloned.CollisionReason = collisionReason ?? cloned.GotoTarget.Reason;
         steps.Add(cloned);
         previous = target;
     }
@@ -564,6 +817,10 @@ internal sealed class DefaultPathCollisionResolver : IPathCollisionResolver
         };
         cloned.TravelDistanceMm = previous is null ? 0 : Distance(previous.Value, target);
         cloned.EstimatedTimeSeconds = cloned.TravelDistanceMm.Value / DefaultMachineSpeedMmPerSecond;
+        cloned.IsCollisionRisk = true;
+        cloned.IsExecutable = false;
+        cloned.MovementKind = "CollisionRisk";
+        cloned.CollisionReason = cloned.GotoTarget.Reason;
         steps.Add(cloned);
         previous = target;
     }
@@ -587,7 +844,9 @@ internal sealed class DefaultPathCollisionResolver : IPathCollisionResolver
         MeasurementStep sourceStep,
         (double X, double Y, double Z) target,
         string name,
-        string reason)
+        string reason,
+        string movementKind = "SafeTransition",
+        bool collisionValidated = false)
     {
         var distance = previous is null ? 0 : Distance(previous.Value, target);
         steps.Add(new MeasurementStep
@@ -607,7 +866,9 @@ internal sealed class DefaultPathCollisionResolver : IPathCollisionResolver
                 Reason = reason
             },
             TravelDistanceMm = distance,
-            EstimatedTimeSeconds = distance / DefaultMachineSpeedMmPerSecond
+            EstimatedTimeSeconds = distance / DefaultMachineSpeedMmPerSecond,
+            MovementKind = movementKind,
+            CollisionValidated = collisionValidated
         });
         previous = target;
     }
@@ -628,7 +889,13 @@ internal sealed class DefaultPathCollisionResolver : IPathCollisionResolver
             NewProbe = source.NewProbe,
             LightingInfo = source.LightingInfo,
             TravelDistanceMm = source.TravelDistanceMm,
-            EstimatedTimeSeconds = source.EstimatedTimeSeconds
+            EstimatedTimeSeconds = source.EstimatedTimeSeconds,
+            CollisionValidated = source.CollisionValidated,
+            IsCollisionRisk = source.IsCollisionRisk,
+            RequiresManualGoto = source.RequiresManualGoto,
+            IsExecutable = source.IsExecutable,
+            MovementKind = source.MovementKind,
+            CollisionReason = source.CollisionReason
         };
     }
 
@@ -648,13 +915,15 @@ internal sealed class DefaultPathCollisionResolver : IPathCollisionResolver
 
     private static double ResolveAutoSafeZ(MeasurementTask task, MeasurementStep sourceStep, MeasurementPlanOptions options)
     {
-        var maxZ = task.Steps
-            .SelectMany(step => EnumerateStepZValues(step))
+        var primitiveZ = task.CollisionPrimitives.Count > 0
+            ? task.CollisionPrimitives.SelectMany(EnumeratePrimitiveZValues)
+            : task.Steps.SelectMany(step => EnumerateStepZValues(step));
+        var maxZ = primitiveZ
             .DefaultIfEmpty(0)
             .Max();
         var probeRadius = ResolveProbeRadius(sourceStep);
         return maxZ
-            + probeRadius
+            + (options.TreatProbeAsPoint ? 0 : ResolveProbeLength(sourceStep) + probeRadius)
             + Math.Max(0, options.CollisionSafetyMarginMm)
             + Math.Max(0, options.SafetyClearanceMm)
             + Math.Max(0, options.AutoSafeGotoExtraClearanceMm);
@@ -722,6 +991,218 @@ internal sealed class DefaultPathCollisionResolver : IPathCollisionResolver
         var diameter = step.ProbeAssignment?.TipDiameter ?? 2.0;
         return double.IsFinite(diameter) && diameter > 0 ? diameter / 2.0 : 1.0;
     }
+
+    private static double ResolveProbeLength(MeasurementStep step)
+    {
+        var length = step.ProbeAssignment?.TipLength ?? 30.0;
+        return double.IsFinite(length) && length > 0 ? length : 30.0;
+    }
+
+    private static double ResolveTransitionClearance(MeasurementStep step, MeasurementPlanOptions options) =>
+        (options.TreatProbeAsPoint ? 0 : ResolveProbeLength(step) + ResolveProbeRadius(step))
+        + Math.Max(0, options.CollisionSafetyMarginMm)
+        + Math.Max(0, options.AutoSafeGotoExtraClearanceMm);
+
+    private static (double X, double Y, double Z) ResolvePreviousFeatureDirection(
+        MeasurementTask task,
+        MeasurementStep sourceStep)
+    {
+        var index = -1;
+        for (var i = 0; i < task.Steps.Count; i++)
+        {
+            if (ReferenceEquals(task.Steps[i], sourceStep))
+            {
+                index = i;
+                break;
+            }
+        }
+        for (var i = index - 1; i >= 0; i--)
+        {
+            var candidateStep = task.Steps[i];
+            if (candidateStep.TargetItem?.Primitive is CylinderPrimitive cylinder)
+                return Normalize((cylinder.AxisDirX, cylinder.AxisDirY, cylinder.AxisDirZ));
+
+            var point = candidateStep.MeasurementPoints?.LastOrDefault();
+            if (point is not null)
+                return Normalize((point.NormalX, point.NormalY, point.NormalZ));
+        }
+
+        return (0, 0, 1);
+    }
+
+    private static MeasurementStep? ResolvePreviousFeatureStep(MeasurementTask task, MeasurementStep sourceStep)
+    {
+        var sourceFeatureId = sourceStep.TargetItem?.Primitive.Id;
+        var sourceIndex = -1;
+        for (var i = 0; i < task.Steps.Count; i++)
+        {
+            if (ReferenceEquals(task.Steps[i], sourceStep))
+            {
+                sourceIndex = i;
+                break;
+            }
+        }
+
+        for (var i = sourceIndex - 1; i >= 0; i--)
+        {
+            var candidate = task.Steps[i];
+            if (candidate.TargetItem is not null
+                && !string.Equals(candidate.TargetItem.Primitive.Id, sourceFeatureId, StringComparison.OrdinalIgnoreCase))
+            {
+                return candidate;
+            }
+        }
+
+        return null;
+    }
+
+    private static string BuildCollisionReason(CollisionResult collision)
+    {
+        var sourceIds = collision.Collisions
+            .SelectMany(item => item.InvolvedElementIds)
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(5)
+            .ToList();
+        return sourceIds.Count == 0
+            ? "Inter-feature direct path and automatic safety-plane path both collide"
+            : $"Inter-feature transition collides with {string.Join(", ", sourceIds)}; automatic safety-plane path also failed";
+    }
+
+    private static (double X, double Y, double Z) ResolveFeatureDirection(
+        MeasurementTask task,
+        MeasurementStep sourceStep)
+    {
+        var featureId = sourceStep.TargetItem?.Primitive.Id;
+        if (sourceStep.TargetItem?.Primitive is CylinderPrimitive cylinder)
+            return Normalize((cylinder.AxisDirX, cylinder.AxisDirY, cylinder.AxisDirZ));
+
+        var point = task.Steps
+            .Where(step => string.Equals(step.TargetItem?.Primitive.Id, featureId, StringComparison.OrdinalIgnoreCase))
+            .SelectMany(step => step.MeasurementPoints ?? [])
+            .FirstOrDefault();
+        return point is null
+            ? Normalize(sourceStep.TargetItem?.Primitive.GetDirection() is { } direction
+                ? (direction.I, direction.J, direction.K)
+                : (0, 0, 1))
+            : Normalize((point.NormalX, point.NormalY, point.NormalZ));
+    }
+
+    private static (double X, double Y, double Z) Offset(
+        (double X, double Y, double Z) point,
+        (double X, double Y, double Z) direction,
+        double distance) =>
+        (point.X + direction.X * distance, point.Y + direction.Y * distance, point.Z + direction.Z * distance);
+
+    private static IReadOnlyList<(double X, double Y, double Z)> BuildTransitionCandidates(
+        (double X, double Y, double Z) point,
+        (double X, double Y, double Z) direction,
+        double fullClearance,
+        double localClearance)
+    {
+        var normalized = Normalize(direction);
+        var shortDistance = double.IsFinite(localClearance) && localClearance > 0
+            ? localClearance
+            : 5.0;
+        return new[]
+        {
+            Offset(point, normalized, fullClearance),
+            Offset(point, (-normalized.X, -normalized.Y, -normalized.Z), fullClearance),
+            Offset(point, normalized, shortDistance),
+            Offset(point, (-normalized.X, -normalized.Y, -normalized.Z), shortDistance),
+            point
+        }.Distinct().ToList();
+    }
+
+    private static IReadOnlyList<(double X, double Y, double Z)> BuildCylinderPortalCandidates(
+        Primitive? primitive,
+        double clearance)
+    {
+        if (primitive is not CylinderPrimitive cylinder)
+            return [];
+
+        var axis = Normalize((cylinder.AxisDirX, cylinder.AxisDirY, cylinder.AxisDirZ));
+        (double X, double Y, double Z) start;
+        (double X, double Y, double Z) end;
+        if (cylinder is { AxisStartX: not null, AxisStartY: not null, AxisStartZ: not null,
+                          AxisEndX: not null, AxisEndY: not null, AxisEndZ: not null })
+        {
+            start = (cylinder.AxisStartX.Value, cylinder.AxisStartY.Value, cylinder.AxisStartZ.Value);
+            end = (cylinder.AxisEndX.Value, cylinder.AxisEndY.Value, cylinder.AxisEndZ.Value);
+        }
+        else
+        {
+            var halfLength = Math.Max(cylinder.Length ?? 0, cylinder.Radius * 2) / 2;
+            var center = (cylinder.AxisPointX, cylinder.AxisPointY, cylinder.AxisPointZ);
+            start = Offset(center, (-axis.X, -axis.Y, -axis.Z), halfLength);
+            end = Offset(center, axis, halfLength);
+        }
+
+        return
+        [
+            Offset(start, (-axis.X, -axis.Y, -axis.Z), clearance),
+            Offset(end, axis, clearance)
+        ];
+    }
+
+    private static (double MinX, double MaxX, double MinY, double MaxY) ResolveWorkpieceBoundsXY(
+        MeasurementTask task,
+        double clearance)
+    {
+        var primitives = task.CollisionPrimitives.Count > 0
+            ? task.CollisionPrimitives
+            : task.Steps.Select(step => step.TargetItem?.Primitive).OfType<Primitive>().DistinctBy(item => item.Id).ToList();
+        var points = new List<(double X, double Y)>();
+        foreach (var primitive in primitives)
+        {
+            var point = primitive.GetRepresentativePoint();
+            var radius = primitive switch
+            {
+                CylinderPrimitive value => value.Radius,
+                CirclePrimitive value => value.Radius,
+                ArcPrimitive value => value.Radius,
+                SpherePrimitive value => value.Radius,
+                _ => 0
+            };
+            points.Add((point.X - radius, point.Y - radius));
+            points.Add((point.X + radius, point.Y + radius));
+
+            if (primitive is Surface3DPrimitive surface)
+                points.AddRange(surface.Vertices.Select(vertex => (vertex.X, vertex.Y)));
+            if (primitive is CylinderPrimitive { AxisStartX: not null, AxisStartY: not null, AxisEndX: not null, AxisEndY: not null } cylinder)
+            {
+                points.Add((cylinder.AxisStartX.Value - cylinder.Radius, cylinder.AxisStartY.Value - cylinder.Radius));
+                points.Add((cylinder.AxisEndX.Value + cylinder.Radius, cylinder.AxisEndY.Value + cylinder.Radius));
+            }
+        }
+
+        if (points.Count == 0)
+            return (-clearance, clearance, -clearance, clearance);
+        return (
+            points.Min(point => point.X) - clearance,
+            points.Max(point => point.X) + clearance,
+            points.Min(point => point.Y) - clearance,
+            points.Max(point => point.Y) + clearance);
+    }
+
+    private static IReadOnlyList<(double X, double Y, double Z)> ResolveSidePoints(
+        (double X, double Y, double Z) point,
+        (double MinX, double MaxX, double MinY, double MaxY) bounds)
+    {
+        var candidates = new[]
+        {
+            (X: bounds.MinX, Y: point.Y, point.Z),
+            (X: bounds.MaxX, Y: point.Y, point.Z),
+            (X: point.X, Y: bounds.MinY, point.Z),
+            (X: point.X, Y: bounds.MaxY, point.Z)
+        };
+        return candidates.OrderBy(candidate => Distance(point, candidate)).ToList();
+    }
+
+    private static (double X, double Y, double Z) WithZ(
+        (double X, double Y, double Z) point,
+        double z) =>
+        (point.X, point.Y, z);
 
     private static (double X, double Y, double Z) Normalize((double X, double Y, double Z) value)
     {

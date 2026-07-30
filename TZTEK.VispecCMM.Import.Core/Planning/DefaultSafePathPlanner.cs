@@ -83,6 +83,7 @@ internal sealed class DefaultSafePathPlanner : ISafePathPlanner
             ToleranceStandard = task.ToleranceStandard,
             LengthUnit = task.LengthUnit,
             Steps = expandedSteps,
+            CollisionPrimitives = task.CollisionPrimitives,
             ProbeConfigurations = task.ProbeConfigurations,
             GlobalSafetyPlane = task.GlobalSafetyPlane,
             PathOptimizationStrategy = task.PathOptimizationStrategy,
@@ -195,6 +196,14 @@ internal sealed class DefaultSafePathPlanner : ISafePathPlanner
         ISafetyPlane? safetyPlane)
     {
         var distance = previous is null ? 0 : Distance(previous.Value, target);
+        var isFeatureInternal = reason.Contains("Return to approach point", StringComparison.OrdinalIgnoreCase)
+            || (reason.Contains("next", StringComparison.OrdinalIgnoreCase)
+                && reason.Contains("approach point", StringComparison.OrdinalIgnoreCase))
+            || (reason.Contains("Enter", StringComparison.OrdinalIgnoreCase)
+                && reason.Contains("measurement path", StringComparison.OrdinalIgnoreCase))
+            || (reason.Equals("Move to approach point", StringComparison.OrdinalIgnoreCase))
+            || (reason.Contains("Exit", StringComparison.OrdinalIgnoreCase)
+                && reason.Contains("measurement path", StringComparison.OrdinalIgnoreCase));
         steps.Add(new MeasurementStep
         {
             SequenceNumber = steps.Count + 1,
@@ -212,7 +221,9 @@ internal sealed class DefaultSafePathPlanner : ISafePathPlanner
             },
             SafetyPlane = safetyPlane,
             TravelDistanceMm = distance,
-            EstimatedTimeSeconds = distance / DefaultMachineSpeedMmPerSecond
+            EstimatedTimeSeconds = distance / DefaultMachineSpeedMmPerSecond,
+            CollisionValidated = isFeatureInternal,
+            MovementKind = isFeatureInternal ? "FeatureInternal" : string.Empty
         });
         previous = target;
     }
@@ -233,7 +244,13 @@ internal sealed class DefaultSafePathPlanner : ISafePathPlanner
             NewProbe = source.NewProbe,
             LightingInfo = source.LightingInfo,
             TravelDistanceMm = source.TravelDistanceMm,
-            EstimatedTimeSeconds = source.EstimatedTimeSeconds
+            EstimatedTimeSeconds = source.EstimatedTimeSeconds,
+            CollisionValidated = source.CollisionValidated,
+            IsCollisionRisk = source.IsCollisionRisk,
+            RequiresManualGoto = source.RequiresManualGoto,
+            IsExecutable = source.IsExecutable,
+            MovementKind = source.MovementKind,
+            CollisionReason = source.CollisionReason
         };
     }
 

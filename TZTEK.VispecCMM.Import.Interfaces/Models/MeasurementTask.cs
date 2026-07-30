@@ -14,6 +14,7 @@ public sealed class MeasurementTask
     public ToleranceStandard ToleranceStandard { get; set; } = ToleranceStandard.ASME;
     public LengthUnit LengthUnit { get; set; } = LengthUnit.Millimeter;
     public IReadOnlyList<MeasurementStep> Steps { get; set; } = [];
+    public IReadOnlyList<Primitive> CollisionPrimitives { get; set; } = [];
     public IReadOnlyList<IProbe> ProbeConfigurations { get; set; } = [];
     public ISafetyPlane? GlobalSafetyPlane { get; set; }
     public PathOptimizationStrategy? PathOptimizationStrategy { get; set; }
@@ -39,6 +40,12 @@ public sealed class MeasurementStep
     public LightingInfo? LightingInfo { get; set; }
     public double? TravelDistanceMm { get; set; }
     public double EstimatedTimeSeconds { get; set; }
+    public bool CollisionValidated { get; set; }
+    public bool IsCollisionRisk { get; set; }
+    public bool RequiresManualGoto { get; set; }
+    public bool IsExecutable { get; set; } = true;
+    public string MovementKind { get; set; } = string.Empty;
+    public string? CollisionReason { get; set; }
 }
 
 /// <summary>

@@ -154,6 +154,10 @@ export interface PathSegment {
   isGoto: boolean
   isAutoGoto: boolean
   hasRisk: boolean
+  isExecutable: boolean
+  requiresManualGoto: boolean
+  collisionValidated: boolean
+  movementKind: string
   reason?: string
   distanceMm: number
 }
@@ -167,6 +171,8 @@ export interface Statistics {
   gotoCount: number
   autoGotoCount: number
   manualGotoCount: number
+  collisionRiskCount: number
+  unexecutableCount: number
   totalPathLengthMm: number
   estimatedTimeSeconds: number
 }

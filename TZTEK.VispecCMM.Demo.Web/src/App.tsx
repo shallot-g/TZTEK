@@ -123,6 +123,8 @@ export default function App() {
       gotoCount: 0,
       autoGotoCount: 0,
       manualGotoCount: 0,
+      collisionRiskCount: 0,
+      unexecutableCount: 0,
       totalPathLengthMm: 0,
       estimatedTimeSeconds: 0,
     },
@@ -370,6 +372,7 @@ export default function App() {
         <Metric label="测点" value={optimized?.measurementPointCount ?? 0} />
         <Metric label="自动 GOTO" value={optimized?.autoGotoCount ?? 0} accent="blue" />
         <Metric label="人工 GOTO" value={optimized?.manualGotoCount ?? 0} accent={optimized?.manualGotoCount ? 'red' : undefined} />
+        <Metric label="碰撞风险" value={optimized?.collisionRiskCount ?? 0} accent={optimized?.collisionRiskCount ? 'red' : undefined} />
         <Metric label="路径长度" value={optimized ? `${optimized.totalPathLengthMm.toFixed(1)} mm` : '0 mm'} />
         <Metric label="已选择" value={selectedFeatureIds.length} accent="amber" />
       </section>
