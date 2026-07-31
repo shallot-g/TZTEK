@@ -72,10 +72,7 @@ internal sealed class DefaultCollisionChecker : ICollisionChecker
         var margin = (options.TreatProbeAsPoint ? 0 : ResolveProbeRadius(movementStep))
             + Math.Max(0, options.CollisionSafetyMarginMm);
         var target = movementStep.TargetItem?.Primitive;
-        var candidates = task.CollisionPrimitives.Count > 0
-            ? task.CollisionPrimitives
-            : task.Steps.Select(step => step.TargetItem?.Primitive).OfType<Primitive>();
-        return candidates
+        return CollisionPrimitiveSource.Resolve(task, options)
             .Where(primitive => !ShouldExcludePrimitive(target, primitive, movementStep))
             .DistinctBy(primitive => primitive.Id)
             .Select(primitive => TryBuildBox(primitive, margin))
@@ -318,7 +315,7 @@ internal sealed class DefaultCollisionChecker : ICollisionChecker
             + Math.Max(0, options.CollisionSafetyMarginMm);
         var collisions = new List<CollisionEvent>();
 
-        foreach (var primitive in EnumerateTransitObstaclePrimitives(task, movementStep))
+        foreach (var primitive in EnumerateTransitObstaclePrimitives(task, movementStep, options))
         {
             if (!SegmentPassesThroughPrimitiveSolid(primitive, start, end, margin))
                 continue;
@@ -358,11 +355,10 @@ internal sealed class DefaultCollisionChecker : ICollisionChecker
 
     private static IEnumerable<Primitive> EnumerateTransitObstaclePrimitives(
         MeasurementTask task,
-        MeasurementStep movementStep)
+        MeasurementStep movementStep,
+        MeasurementPlanOptions options)
     {
-        var primitives = (task.CollisionPrimitives.Count > 0
-                ? task.CollisionPrimitives
-                : task.Steps.Select(step => step.TargetItem?.Primitive).OfType<Primitive>())
+        var primitives = CollisionPrimitiveSource.Resolve(task, options)
             .DistinctBy(primitive => primitive.Id)
             .ToList();
 

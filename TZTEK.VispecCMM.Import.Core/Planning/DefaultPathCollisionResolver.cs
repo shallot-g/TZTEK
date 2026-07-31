@@ -324,7 +324,7 @@ internal sealed class DefaultPathCollisionResolver : IPathCollisionResolver
 
         var clearance = ResolveTransitionClearance(sourceStep, options);
         var previousFeatureStep = ResolvePreviousFeatureStep(task, sourceStep) ?? sourceStep;
-        var escapeTask = BuildEscapeCollisionTask(task, start, previousFeatureStep, options, segmentIndex);
+        var escapeTask = BuildEscapeCollisionTask(task, previousFeatureStep);
         var departureCandidates = BuildTransitionCandidates(
                 start,
                 ResolvePreviousFeatureDirection(task, sourceStep),
@@ -488,30 +488,15 @@ internal sealed class DefaultPathCollisionResolver : IPathCollisionResolver
         return false;
     }
 
-    private MeasurementTask BuildEscapeCollisionTask(
+    private static MeasurementTask BuildEscapeCollisionTask(
         MeasurementTask task,
-        (double X, double Y, double Z) start,
-        MeasurementStep sourceStep,
-        MeasurementPlanOptions options,
-        int segmentIndex)
+        MeasurementStep sourceStep)
     {
-        var candidates = task.CollisionPrimitives.Count > 0
-            ? task.CollisionPrimitives
-            : task.Steps.Select(step => step.TargetItem?.Primitive).OfType<Primitive>().DistinctBy(item => item.Id).ToList();
-        var obstacles = new List<Primitive>();
-        foreach (var primitive in candidates)
-        {
-            var singleObstacleTask = CloneCollisionContext(task, [primitive]);
-            var startsInside = _collisionChecker.Check(
-                singleObstacleTask,
-                start,
-                start,
-                sourceStep,
-                options,
-                segmentIndex).HasCollision;
-            if (!startsInside)
-                obstacles.Add(primitive);
-        }
+        var excludeId = sourceStep.TargetItem?.Primitive.Id;
+        var obstacles = CollisionPrimitiveSource.Resolve(task)
+            .Where(primitive => excludeId is null
+                || !string.Equals(primitive.Id, excludeId, StringComparison.OrdinalIgnoreCase))
+            .ToList();
 
         return CloneCollisionContext(task, obstacles);
     }
@@ -915,9 +900,7 @@ internal sealed class DefaultPathCollisionResolver : IPathCollisionResolver
 
     private static double ResolveAutoSafeZ(MeasurementTask task, MeasurementStep sourceStep, MeasurementPlanOptions options)
     {
-        var primitiveZ = task.CollisionPrimitives.Count > 0
-            ? task.CollisionPrimitives.SelectMany(EnumeratePrimitiveZValues)
-            : task.Steps.SelectMany(step => EnumerateStepZValues(step));
+        var primitiveZ = CollisionPrimitiveSource.Resolve(task, options).SelectMany(EnumeratePrimitiveZValues);
         var maxZ = primitiveZ
             .DefaultIfEmpty(0)
             .Max();
@@ -1149,9 +1132,7 @@ internal sealed class DefaultPathCollisionResolver : IPathCollisionResolver
         MeasurementTask task,
         double clearance)
     {
-        var primitives = task.CollisionPrimitives.Count > 0
-            ? task.CollisionPrimitives
-            : task.Steps.Select(step => step.TargetItem?.Primitive).OfType<Primitive>().DistinctBy(item => item.Id).ToList();
+        var primitives = CollisionPrimitiveSource.Resolve(task);
         var points = new List<(double X, double Y)>();
         foreach (var primitive in primitives)
         {
