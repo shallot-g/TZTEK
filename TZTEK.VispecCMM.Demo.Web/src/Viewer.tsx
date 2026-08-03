@@ -9,6 +9,8 @@ interface ViewerProps {
   plan: PathPlan
   currentStep: number
   selectedFeatureId?: string
+  selectedFeatureIds: string[]
+  selectedFeaturesIsolationMode: boolean
   layers: LayerState
   cameraView: string
   onSelectFeature: (id?: string) => void
@@ -25,8 +27,13 @@ const colors = {
   point: 0xff9638,
 }
 
-export default function Viewer({ result, plan, currentStep, selectedFeatureId, layers, cameraView, onSelectFeature }: ViewerProps) {
+export default function Viewer({ result, plan, currentStep, selectedFeatureId, selectedFeatureIds, selectedFeaturesIsolationMode, layers, cameraView, onSelectFeature }: ViewerProps) {
   const hostRef = useRef<HTMLDivElement>(null)
+  const cameraSnapshotRef = useRef<{
+    sessionId: string
+    position: THREE.Vector3
+    target: THREE.Vector3
+  } | null>(null)
   const stateRef = useRef<{
     renderer: THREE.WebGLRenderer
     scene: THREE.Scene
@@ -64,31 +71,47 @@ export default function Viewer({ result, plan, currentStep, selectedFeatureId, l
     const grid = new THREE.GridHelper(300, 30, 0x3a4652, 0x252d35)
     grid.rotation.x = Math.PI / 2
     grid.position.z = result.bounds.min[2] - 0.5
+    grid.visible = !selectedFeaturesIsolationMode
     scene.add(grid)
 
+    let disposed = false
+    const selectedFeatureIdSet = new Set(selectedFeatureIds)
     const featureObjects: THREE.Object3D[] = []
-    if (layers.features) {
-      result.features.forEach(feature => {
-        const object = createFeatureObject(feature, feature.id === selectedFeatureId)
-        if (object) {
-          object.userData.featureId = feature.id
-          featureObjects.push(object)
-          scene.add(object)
-        }
+    if (layers.features || selectedFeaturesIsolationMode) {
+      result.features
+        .filter(feature => !selectedFeaturesIsolationMode || selectedFeatureIdSet.has(feature.id))
+        .forEach(feature => {
+          const object = createFeatureObject(feature, selectedFeaturesIsolationMode || feature.id === selectedFeatureId)
+          if (object) {
+            object.userData.featureId = feature.id
+            featureObjects.push(object)
+            scene.add(object)
+          }
       })
     }
 
-    if (layers.workpiece && result.modelUrl) {
+    if ((layers.workpiece || selectedFeaturesIsolationMode) && result.modelUrl) {
       new STLLoader().load(result.modelUrl, geometry => {
+        if (disposed) {
+          geometry.dispose()
+          return
+        }
         geometry.computeVertexNormals()
-        const material = new THREE.MeshStandardMaterial({ color: 0x747d86, roughness: 0.78, metalness: 0.05, transparent: true, opacity: 0.72 })
+        const material = new THREE.MeshStandardMaterial({
+          color: 0x747d86,
+          roughness: 0.78,
+          metalness: 0.05,
+          transparent: true,
+          opacity: selectedFeaturesIsolationMode ? 0.18 : 0.72,
+          depthWrite: !selectedFeaturesIsolationMode,
+        })
         const mesh = new THREE.Mesh(geometry, material)
         mesh.name = 'workpiece'
         scene.add(mesh)
       })
     }
 
-    if (layers.points) {
+    if (layers.points && !selectedFeaturesIsolationMode) {
       const positions = result.features.flatMap(feature => feature.measurementPoints.flatMap(point => point.position))
       const geometry = new THREE.BufferGeometry()
       geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3))
@@ -102,7 +125,7 @@ export default function Viewer({ result, plan, currentStep, selectedFeatureId, l
       })
     }
 
-    if (layers.normals) {
+    if (layers.normals && !selectedFeaturesIsolationMode) {
       const vertices: number[] = []
       result.features.forEach(feature => feature.measurementPoints.forEach(point => {
         vertices.push(...point.position)
@@ -123,7 +146,7 @@ export default function Viewer({ result, plan, currentStep, selectedFeatureId, l
     const active = new THREE.Line(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({ color: 0xffffff }))
     scene.add(completed, future, risk, active)
 
-    if (layers.safety) {
+    if (layers.safety && !selectedFeaturesIsolationMode) {
       const safetyZ = Math.max(
         result.bounds.max[2] + 10,
         ...plan.segments.filter(segment => segment.isAutoGoto).flatMap(segment => [segment.start[2], segment.end[2]]),
@@ -142,6 +165,7 @@ export default function Viewer({ result, plan, currentStep, selectedFeatureId, l
     }
 
     const probe = createProbe(result.probe?.tipDiameterMm ?? 2, result.probe?.tipLengthMm ?? 20)
+    probe.visible = !selectedFeaturesIsolationMode
     scene.add(probe)
 
     const box = new THREE.Box3(
@@ -150,8 +174,14 @@ export default function Viewer({ result, plan, currentStep, selectedFeatureId, l
     )
     const center = box.getCenter(new THREE.Vector3())
     const size = Math.max(box.getSize(new THREE.Vector3()).length(), 30)
-    controls.target.copy(center)
-    camera.position.set(center.x + size * 0.9, center.y - size * 1.1, center.z + size * 0.75)
+    const cameraSnapshot = cameraSnapshotRef.current
+    if (cameraSnapshot?.sessionId === result.sessionId) {
+      controls.target.copy(cameraSnapshot.target)
+      camera.position.copy(cameraSnapshot.position)
+    } else {
+      controls.target.copy(center)
+      camera.position.set(center.x + size * 0.9, center.y - size * 1.1, center.z + size * 0.75)
+    }
     camera.near = Math.max(0.01, size / 10000)
     camera.far = size * 100
     camera.updateProjectionMatrix()
@@ -191,6 +221,12 @@ export default function Viewer({ result, plan, currentStep, selectedFeatureId, l
     animate()
 
     return () => {
+      disposed = true
+      cameraSnapshotRef.current = {
+        sessionId: result.sessionId,
+        position: camera.position.clone(),
+        target: controls.target.clone(),
+      }
       observer.disconnect()
       renderer.domElement.removeEventListener('pointerdown', click)
       cancelAnimationFrame(stateRef.current?.frame ?? 0)
@@ -209,7 +245,7 @@ export default function Viewer({ result, plan, currentStep, selectedFeatureId, l
       renderer.dispose()
       stateRef.current = null
     }
-  }, [result, plan, layers, selectedFeatureId, onSelectFeature])
+  }, [result, plan, layers, selectedFeatureId, selectedFeatureIds, selectedFeaturesIsolationMode, onSelectFeature])
 
   useEffect(() => {
     const state = stateRef.current
@@ -234,11 +270,12 @@ export default function Viewer({ result, plan, currentStep, selectedFeatureId, l
     } else {
       state.probe.visible = false
     }
-    state.completed.visible = layers.path
-    state.future.visible = layers.path
-    state.risk.visible = layers.path
-    state.active.visible = layers.path && (layers.goto || !segment?.isGoto)
-  }, [currentStep, plan, layers.path, layers.goto])
+    state.completed.visible = layers.path && !selectedFeaturesIsolationMode
+    state.future.visible = layers.path && !selectedFeaturesIsolationMode
+    state.risk.visible = layers.path && !selectedFeaturesIsolationMode
+    state.active.visible = layers.path && !selectedFeaturesIsolationMode && (layers.goto || !segment?.isGoto)
+    state.probe.visible = !selectedFeaturesIsolationMode && Boolean(segment)
+  }, [currentStep, plan, layers.path, layers.goto, selectedFeaturesIsolationMode])
 
   useEffect(() => {
     const state = stateRef.current
