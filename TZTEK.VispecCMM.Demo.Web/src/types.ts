@@ -30,6 +30,7 @@ export interface DrawingFile {
 }
 
 export interface DrawingAssistResult {
+  provider: DrawingAssistProviderId
   status: string
   message: string
   progress: number
@@ -47,7 +48,18 @@ export interface DrawingAssistResult {
   failedPageCount: number
 }
 
+export type DrawingAssistProviderId = 'volcengine' | 'openai'
+
+export interface DrawingAssistProvider {
+  id: DrawingAssistProviderId
+  displayName: string
+  isConfigured: boolean
+  model: string
+  unavailableReason?: string
+}
+
 export interface DrawingAssistPageDiagnostic {
+  provider: string
   runId: string
   pdfHash: string
   imageHash: string

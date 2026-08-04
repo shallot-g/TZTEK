@@ -193,6 +193,52 @@ npm run build
 Remove-Item Env:ARK_API_KEY -ErrorAction SilentlyContinue
 Remove-Item Env:ARK_VISION_ENDPOINT_ID -ErrorAction SilentlyContinue
 Remove-Item Env:ARK_BASE_URL -ErrorAction SilentlyContinue
+Remove-Item Env:OPENAI_API_KEY -ErrorAction SilentlyContinue
+Remove-Item Env:OPENAI_MODEL -ErrorAction SilentlyContinue
+Remove-Item Env:OPENAI_BASE_URL -ErrorAction SilentlyContinue
+Remove-Item Env:OPENAI_TIMEOUT_SECONDS -ErrorAction SilentlyContinue
+Remove-Item Env:OPENAI_REASONING_EFFORT -ErrorAction SilentlyContinue
 ```
 
 不要把真实 API Key 写入本文件。
+
+## GPT-5.6 供应商测试
+
+在启动后端的同一个 PowerShell 窗口设置 OpenAI 配置：
+
+```powershell
+Set-Location D:\summer_stage\project\TZTEK
+
+$env:OPENAI_API_KEY = "在这里填入OpenAI API Key"
+$env:OPENAI_MODEL = "gpt-5.6-sol"
+$env:OPENAI_BASE_URL = "https://api.openai.com/v1"
+$env:OPENAI_TIMEOUT_SECONDS = "300"
+$env:OPENAI_REASONING_EFFORT = "medium"
+
+dotnet run --project .\TZTEK.VispecCMM.Demo.Api\TZTEK.VispecCMM.Demo.Api.csproj --urls http://localhost:5078
+```
+
+检查后端识别到的供应商状态：
+
+```powershell
+Invoke-RestMethod http://localhost:5078/api/demo/drawing-assist/providers | Format-Table id,displayName,isConfigured,model,unavailableReason
+```
+
+预期 `openai` 行显示：
+
+```text
+isConfigured = True
+model = gpt-5.6-sol
+```
+
+打开前端后，在 AI 辅助栏选择 `GPT-5.6`，再点击“开始 AI 推荐”。日志应包含 `OpenAI response`、HTTP 状态、request ID、模型和 token 用量，但不得出现 API Key、Base64 图片或完整响应。
+
+也可以直接调用识别接口验证供应商参数：
+
+```powershell
+$sessionId = "替换为页面URL中的session参数"
+$body = @{ provider = "openai" } | ConvertTo-Json
+Invoke-RestMethod "http://localhost:5078/api/demo/sessions/$sessionId/drawing-assist" -Method Post -ContentType "application/json" -Body $body
+```
+
+将 `provider` 改为 `volcengine` 应只调用豆包。传入其他值应返回 HTTP 400，并且不能自动调用另一个供应商。

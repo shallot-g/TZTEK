@@ -5,6 +5,7 @@ import {
   ChevronRight,
   Download,
   Eye,
+  EyeOff,
   FileBox,
   FolderOpen,
   Gauge,
@@ -17,9 +18,9 @@ import {
   Trash2,
   Upload,
 } from 'lucide-react'
-import { clearMeasurementPlan, createExampleSession, createUploadSession, deleteDrawing, generateMeasurementPlan, getExamples, getSession, saveFeatureSelection, setAiAssist, startDrawingAssist, uploadDrawing } from './api'
+import { clearMeasurementPlan, createExampleSession, createUploadSession, deleteDrawing, generateMeasurementPlan, getDrawingAssistProviders, getExamples, getSession, saveFeatureSelection, setAiAssist, startDrawingAssist, uploadDrawing } from './api'
 import Viewer from './Viewer'
-import type { DemoExample, DemoSession, LayerState, VisualizationFeature, VisualizationResult } from './types'
+import type { DemoExample, DemoSession, DrawingAssistProvider, DrawingAssistProviderId, LayerState, VisualizationFeature, VisualizationResult } from './types'
 
 const defaultLayers: LayerState = {
   workpiece: true,
@@ -41,6 +42,7 @@ export default function App() {
   const [query, setQuery] = useState('')
   const [selectedFeatureId, setSelectedFeatureId] = useState<string>()
   const [selectedFeatureIds, setSelectedFeatureIds] = useState<string[]>([])
+  const [selectedFeaturesIsolationMode, setSelectedFeaturesIsolationMode] = useState(false)
   const [savedFeatureIds, setSavedFeatureIds] = useState<string[]>([])
   const [aiAssistEnabled, setAiAssistEnabled] = useState(false)
   const [drawingFile, setDrawingFile] = useState<File>()
@@ -49,6 +51,8 @@ export default function App() {
   const [isDrawingAssistRunning, setIsDrawingAssistRunning] = useState(false)
   const [drawingAssistProgress, setDrawingAssistProgress] = useState(0)
   const [drawingAssistPhase, setDrawingAssistPhase] = useState('')
+  const [drawingAssistProvider, setDrawingAssistProvider] = useState<DrawingAssistProviderId>('volcengine')
+  const [drawingAssistProviders, setDrawingAssistProviders] = useState<DrawingAssistProvider[]>([])
   const [isGeneratingPlan, setIsGeneratingPlan] = useState(false)
   const [planProgress, setPlanProgress] = useState(0)
   const [currentStep, setCurrentStep] = useState(0)
@@ -61,10 +65,18 @@ export default function App() {
   const drawingInput = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
+    if (selectedFeatureIds.length === 0) setSelectedFeaturesIsolationMode(false)
+  }, [selectedFeatureIds.length])
+
+  useEffect(() => {
     getExamples().then(values => {
       setExamples(values)
       if (values.length && !values.some(value => value.id === exampleId)) setExampleId(values[0].id)
     }).catch(() => setExamples([]))
+  }, [])
+
+  useEffect(() => {
+    getDrawingAssistProviders().then(setDrawingAssistProviders).catch(() => setDrawingAssistProviders([]))
   }, [])
 
   useEffect(() => {
@@ -257,7 +269,7 @@ export default function App() {
       setDrawingAssistProgress(5)
       setDrawingAssistPhase('渲染完整 PDF 页面')
       setSession(current => current ? { ...current, drawingAssistStatus: 'RenderingDrawing', drawingAssistProgress: 5 } : current)
-      const response = await startDrawingAssist(session.id)
+      const response = await startDrawingAssist(session.id, drawingAssistProvider)
       setSession(current => current ? { ...current, drawingAssistStatus: response.status, drawingAssistProgress: response.progress, aiRecommendations: response.recommendations } : current)
       setDrawingAssistProgress(response.progress)
       setDrawingAssistPhase('推荐完成')
@@ -272,7 +284,8 @@ export default function App() {
       const cachedTokens = pageDiagnostics.reduce((sum, page) => sum + (page.cachedTokens ?? 0), 0)
       const elapsed = pageDiagnostics.reduce((sum, page) => sum + page.elapsedMilliseconds, 0)
       const statuses = pageDiagnostics.filter(page => page.responseStatus || page.incompleteDetails).map(page => `第${page.pageNumber}页 ${page.responseStatus || ''}${page.incompleteDetails ? `（${page.incompleteDetails}）` : ''}`).join('；')
-      setDrawingMessage(`${response.message} 模型：${response.model || 'Doubao'}；成功页面 ${successfulPages}，失败页面 ${failedPages}，已自动勾选 ${response.recommendedCount} 个候选，低置信 ${response.lowConfidenceCount} 个；耗时 ${elapsed}ms，输入 token ${inputTokens}，输出 token ${outputTokens}，缓存 token ${cachedTokens}。${statuses ? `状态：${statuses}。` : ''}${requestSummary}`)
+      const providerName = response.provider === 'openai' ? 'OpenAI' : '豆包'
+      setDrawingMessage(`${response.message} 供应商：${providerName}；模型：${response.model || '未知'}；成功页面 ${successfulPages}，失败页面 ${failedPages}，已自动勾选 ${response.recommendedCount} 个候选，低置信 ${response.lowConfidenceCount} 个；耗时 ${elapsed}ms，输入 token ${inputTokens}，输出 token ${outputTokens}，缓存 token ${cachedTokens}。${statuses ? `状态：${statuses}。` : ''}${requestSummary}`)
       setError('')
     } catch (reason) {
       setDrawingAssistPhase('AI 推荐失败')
@@ -348,11 +361,20 @@ export default function App() {
       {result && (
         <section className="drawing-assist-bar">
           <div className="drawing-assist-title"><Sparkles size={17} /><div><strong>2D 图纸辅助</strong><span>{aiAssistEnabled ? 'AI 辅助已开启，可上传对应 PDF' : '请先开启顶部 AI 辅助，再使用图纸推荐'}</span></div></div>
+          <div className="provider-segment" role="group" aria-label="AI 供应商">
+            {(['volcengine', 'openai'] as DrawingAssistProviderId[]).map(id => {
+              const info = drawingAssistProviders.find(item => item.id === id)
+              const unavailable = info ? !info.isConfigured : false
+              return <button key={id} type="button" className={drawingAssistProvider === id ? 'active' : ''}
+                disabled={isDrawingAssistRunning || unavailable} title={unavailable ? info?.unavailableReason : info?.model}
+                onClick={() => setDrawingAssistProvider(id)}>{id === 'openai' ? 'GPT-5.6' : '豆包'}</button>
+            })}
+          </div>
           <input ref={drawingInput} type="file" accept="application/pdf,.pdf" hidden onChange={event => setDrawingFile(event.target.files?.[0])} />
           <button className="icon-text-button" disabled={!aiAssistEnabled} onClick={() => drawingInput.current?.click()} title={!aiAssistEnabled ? '请先开启 AI 辅助' : '选择与 STEP 对应的 PDF 图纸'}><FolderOpen size={16} /><span>{drawingFile?.name ?? '选择 PDF'}</span></button>
           <button className="icon-text-button" disabled={!aiAssistEnabled || !drawingFile || isUploadingDrawing} onClick={submitDrawing}><Upload size={16} />{isUploadingDrawing ? '上传中…' : '上传图纸'}</button>
           {session?.drawingFile && <div className="drawing-file-state"><strong>{session.drawingFile.fileName}</strong><span>{formatFileSize(session.drawingFile.sizeBytes)} · 已上传</span></div>}
-          <button className="primary-button" disabled={!session?.drawingFile || isDrawingAssistRunning} onClick={requestDrawingAssist}><Sparkles size={16} />{isDrawingAssistRunning ? 'AI 推荐中…' : '开始 AI 推荐'}</button>
+          <button className="primary-button" disabled={!session?.drawingFile || isDrawingAssistRunning || drawingAssistProviders.some(item => item.id === drawingAssistProvider && !item.isConfigured)} onClick={requestDrawingAssist}><Sparkles size={16} />{isDrawingAssistRunning ? 'AI 推荐中…' : '开始 AI 推荐'}</button>
           <button className="icon-button" disabled={!session?.drawingFile} onClick={removeDrawing} title="移除图纸"><Trash2 size={16} /></button>
           <div className="drawing-assist-status">
             <span className="drawing-assist-message">{drawingMessage || drawingAssistPhase || '等待 AI 推荐'}</span>
@@ -411,6 +433,16 @@ export default function App() {
               <span>人工选择路径</span>
             </div>
             <div className="camera-controls">
+              <button
+                className={`isolation-button ${selectedFeaturesIsolationMode ? 'active' : ''}`}
+                disabled={selectedFeatureIds.length === 0}
+                onClick={() => setSelectedFeaturesIsolationMode(value => !value)}
+                title={selectedFeatureIds.length === 0 ? '请先勾选需要查看的基元' : selectedFeaturesIsolationMode ? '恢复正常图层显示' : '仅显示已勾选基元'}
+                aria-pressed={selectedFeaturesIsolationMode}
+              >
+                {selectedFeaturesIsolationMode ? <EyeOff size={15} /> : <Eye size={15} />}
+                <span>{selectedFeaturesIsolationMode ? '退出隔离显示' : '显示勾选基元'}</span>
+              </button>
               {['top', 'front', 'side', 'iso'].map(view => (
                 <button key={view} className={`view-button ${cameraView === view ? 'active' : ''}`} onClick={() => setCameraView(view)}>
                   {view === 'top' ? '顶' : view === 'front' ? '前' : view === 'side' ? '侧' : '轴测'}
@@ -442,6 +474,8 @@ export default function App() {
                 plan={plan}
                 currentStep={currentStep}
                 selectedFeatureId={selectedFeatureId}
+                selectedFeatureIds={selectedFeatureIds}
+                selectedFeaturesIsolationMode={selectedFeaturesIsolationMode}
                 layers={layers}
                 cameraView={cameraView}
                 onSelectFeature={setSelectedFeatureId}
@@ -616,7 +650,7 @@ function describeDrawingAssistPhase(status: string, progress: number) {
   if (status === 'Completed') return '推荐完成'
   if (status === 'Failed') return 'AI 推荐失败'
   if (status === 'RenderingDrawing') return '渲染完整 PDF 页面'
-  if (status === 'AnalyzingPages') return '豆包整页识别'
+  if (status === 'AnalyzingPages') return 'AI 整页识别'
   if (status === 'MatchingFeatures') return '匹配 STEP 基元'
   return progress > 0 ? '正在处理' : '等待 AI 推荐'
 }
