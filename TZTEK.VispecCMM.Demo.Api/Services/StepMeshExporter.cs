@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using TZTEK.VispecCMM.Import.Core.External;
 
 namespace TZTEK.VispecCMM.Demo.Api.Services;
 
@@ -25,9 +26,7 @@ internal static class StepMeshExporter
         }
 
         var outputPath = Path.Combine(outputDirectory, "model.stl");
-        var python = Environment.GetEnvironmentVariable("TZTEK_PARSER_PYTHON");
-        if (string.IsNullOrWhiteSpace(python))
-            python = "python";
+        var python = PythonExecutableResolver.Resolve(script);
 
         var info = new ProcessStartInfo
         {

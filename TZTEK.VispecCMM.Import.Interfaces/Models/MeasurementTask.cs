@@ -16,7 +16,11 @@ public sealed class MeasurementTask
     public IReadOnlyList<MeasurementStep> Steps { get; set; } = [];
     public IReadOnlyList<Primitive> CollisionPrimitives { get; set; } = [];
     public IReadOnlyList<IProbe> ProbeConfigurations { get; set; } = [];
+    /// <summary>兼容旧逻辑的全局顶面安全平面；与 <see cref="SafetyEnvelope"/> 顶面一致。</summary>
     public ISafetyPlane? GlobalSafetyPlane { get; set; }
+
+    /// <summary>六面安全平面包围盒（含底面）。</summary>
+    public SafetyPlaneBox? SafetyEnvelope { get; set; }
     public PathOptimizationStrategy? PathOptimizationStrategy { get; set; }
     public double EstimatedTotalTimeSeconds { get; set; }
     public double TotalPathLengthMm { get; set; }

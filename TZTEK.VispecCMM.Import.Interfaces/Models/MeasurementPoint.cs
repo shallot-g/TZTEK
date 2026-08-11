@@ -15,6 +15,17 @@ public sealed class MeasurementPoint
     public double ApproachDistance { get; set; } = 5.0;
     public double RetractDistance { get; set; } = 5.0;
     public double SearchDistance { get; set; } = 2.0;
+
+    /// <summary>打分选定的所属安全盒面。</summary>
+    public SafetyPlaneFace? AssignedSafetyPlaneFace { get; set; }
+
+    /// <summary>安全平面分配综合得分（越高越优）。</summary>
+    public double? SafetyPlaneAssignmentScore { get; set; }
+
+    /// <summary>投影到所属安全面上的安全位置。</summary>
+    public double? SafetyPlaneSafeX { get; set; }
+    public double? SafetyPlaneSafeY { get; set; }
+    public double? SafetyPlaneSafeZ { get; set; }
 }
 
 /// <summary>测点分布模式</summary>

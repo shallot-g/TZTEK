@@ -1,7 +1,7 @@
-namespace TZTEK.VispecCMM.Import.Core.Planning;
+namespace TZTEK.VispecCMM.Import.Core.Planning.Collision;
 
 /// <summary>
-/// 碰撞检测必须使用全工件基元；测量路径步骤只包含已选待测基元。
+/// 碰撞检测使用的工件基元来源。
 /// </summary>
 internal static class CollisionPrimitiveSource
 {
