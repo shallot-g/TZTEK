@@ -269,36 +269,75 @@ public sealed class MeasurementSceneBuilder : IMeasurementSceneBuilder
     {
         foreach (var task in tasks)
         {
-            if (task.GlobalSafetyPlane is not ISafetyPlane plane)
-                continue;
-
-            var half = 50.0;
-            var position = plane.GetPosition();
-            var cx = position.X;
-            var cy = position.Y;
-            var cz = position.Z;
-            var direction = plane.GetDirection();
-            var (nx, ny, nz) = direction;
-            var (ux, uy, uz) = OrthogonalVector(nx, ny, nz);
-            var (vx, vy, vz) = Cross(nx, ny, nz, ux, uy, uz);
-
-            yield return new MeasurementSceneObject
+            if (task.SafetyEnvelope is { } envelope)
             {
-                Id = $"safety_plane_{task.TaskId}",
-                Kind = SceneObjectKind.SafetyPlane,
-                Label = plane.Name,
-                Color = new SceneColor(120, 180, 255),
-                Opacity = 0.15,
-                Points =
-                [
-                    Offset(cx, cy, cz, ux, uy, uz, vx, vy, vz, -half, -half),
-                    Offset(cx, cy, cz, ux, uy, uz, vx, vy, vz, half, -half),
-                    Offset(cx, cy, cz, ux, uy, uz, vx, vy, vz, half, half),
-                    Offset(cx, cy, cz, ux, uy, uz, vx, vy, vz, -half, half),
-                    Offset(cx, cy, cz, ux, uy, uz, vx, vy, vz, -half, -half)
-                ]
-            };
+                foreach (var plane in envelope.GetAllPlanes())
+                {
+                    var (halfU, halfV) = ResolvePlaneHalfSize(envelope, plane);
+                    yield return CreateSafetyPlaneObject(task.TaskId, plane, halfU, halfV, ResolveFaceColor(plane.Id));
+                }
+
+                continue;
+            }
+
+            if (task.GlobalSafetyPlane is ISafetyPlane legacyPlane)
+                yield return CreateSafetyPlaneObject(task.TaskId, legacyPlane, 50.0, 50.0, new SceneColor(120, 180, 255));
         }
+    }
+
+    private static (double HalfU, double HalfV) ResolvePlaneHalfSize(SafetyPlaneBox envelope, ISafetyPlane plane)
+    {
+        var normal = plane.GetDirection();
+        if (Math.Abs(normal.Item3) > 0.9)
+            return (envelope.SizeX / 2.0, envelope.SizeY / 2.0);
+
+        if (Math.Abs(normal.Item1) > 0.9)
+            return (envelope.SizeY / 2.0, envelope.SizeZ / 2.0);
+
+        return (envelope.SizeX / 2.0, envelope.SizeZ / 2.0);
+    }
+
+    private static SceneColor ResolveFaceColor(string planeId)
+    {
+        if (planeId.Contains("bottom", StringComparison.OrdinalIgnoreCase))
+            return new SceneColor(180, 140, 255);
+
+        if (planeId.Contains("top", StringComparison.OrdinalIgnoreCase))
+            return new SceneColor(120, 180, 255);
+
+        return new SceneColor(100, 200, 180);
+    }
+
+    private static MeasurementSceneObject CreateSafetyPlaneObject(
+        string taskId,
+        ISafetyPlane plane,
+        double halfU,
+        double halfV,
+        SceneColor color)
+    {
+        var position = plane.GetPosition();
+        var (cx, cy, cz) = position;
+        var direction = plane.GetDirection();
+        var (nx, ny, nz) = direction;
+        var (ux, uy, uz) = OrthogonalVector(nx, ny, nz);
+        var (vx, vy, vz) = Cross(nx, ny, nz, ux, uy, uz);
+
+        return new MeasurementSceneObject
+        {
+            Id = $"safety_plane_{taskId}_{plane.Id}",
+            Kind = SceneObjectKind.SafetyPlane,
+            Label = plane.Name,
+            Color = color,
+            Opacity = 0.15,
+            Points =
+            [
+                Offset(cx, cy, cz, ux, uy, uz, vx, vy, vz, -halfU, -halfV),
+                Offset(cx, cy, cz, ux, uy, uz, vx, vy, vz, halfU, -halfV),
+                Offset(cx, cy, cz, ux, uy, uz, vx, vy, vz, halfU, halfV),
+                Offset(cx, cy, cz, ux, uy, uz, vx, vy, vz, -halfU, halfV),
+                Offset(cx, cy, cz, ux, uy, uz, vx, vy, vz, -halfU, -halfV)
+            ]
+        };
     }
 
     private static SceneColor ClassifyGotoColor(string reason)

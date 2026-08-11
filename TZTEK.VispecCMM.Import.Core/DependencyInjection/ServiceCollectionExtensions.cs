@@ -4,6 +4,8 @@ using TZTEK.VispecCMM.Import.Core.Extraction;
 using TZTEK.VispecCMM.Import.Core.Importers;
 using TZTEK.VispecCMM.Import.Core.Pipeline;
 using TZTEK.VispecCMM.Import.Core.Planning;
+using TZTEK.VispecCMM.Import.Core.Planning.Collision;
+using TZTEK.VispecCMM.Import.Core.Planning.Path;
 using TZTEK.VispecCMM.Import.Core.Services;
 
 namespace TZTEK.VispecCMM.Import.Core.DependencyInjection;

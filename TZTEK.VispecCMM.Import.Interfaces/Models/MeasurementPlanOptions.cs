@@ -28,15 +28,15 @@ public sealed class MeasurementPlanOptions
     public bool TreatProbeAsPoint { get; set; } = true;
     public IReadOnlyList<GotoPoint> UserGotoPoints { get; set; } = [];
     public IReadOnlyList<Primitive> CollisionPrimitives { get; set; } = [];
-    public double CollisionSafetyMarginMm { get; set; } = 2.0;
-    public double AutoSafeGotoExtraClearanceMm { get; set; } = 5.0;
+    public double CollisionSafetyMarginMm { get; set; } = 0.3;
+    public double AutoSafeGotoExtraClearanceMm { get; set; } = 1.0;
     public ToleranceStandard ToleranceStandard { get; set; } = ToleranceStandard.ASME;
     public NamingRule? NamingRule { get; set; }
 
     public double DefaultApproachDistanceMm { get; set; } = 5.0;
     public double DefaultRetractDistanceMm { get; set; } = 5.0;
     public double DefaultSearchDistanceMm { get; set; } = 2.0;
-    public double SafetyClearanceMm { get; set; } = 10.0;
+    public double SafetyClearanceMm { get; set; } = 2.0;
     public double MinPlaneAreaMm2 { get; set; } = 1.0;
     public double MinCylinderRadiusMm { get; set; } = 0.1;
     public int LinePointCount { get; set; } = 3;

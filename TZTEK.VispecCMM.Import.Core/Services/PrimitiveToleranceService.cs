@@ -77,12 +77,15 @@ public sealed class PrimitiveToleranceService : IPrimitiveToleranceService
         var items = primitiveIds.Count == 0
             ? _lastImportResult.Items
             : _lastImportResult.Items.Where(item => primitiveIds.Contains(item.Primitive.Id, StringComparer.OrdinalIgnoreCase)).ToList();
-        options.CollisionPrimitives = _lastImportResult.Items.Select(item => item.Primitive).ToList();
+
+        // 碰撞体始终使用导入的全部基元，与勾选待测集合无关。
+        var allCollisionPrimitives = _lastImportResult.Items.Select(item => item.Primitive).ToList();
+        options.CollisionPrimitives = allCollisionPrimitives;
         var tasks = _measurementPlanner.Plan(items, _assignedProbes, options).ToList();
         foreach (var task in tasks)
         {
             task.SourceFilePath = _lastImportResult.FilePath;
-            task.CollisionPrimitives = _lastImportResult.Items.Select(item => item.Primitive).ToList();
+            task.CollisionPrimitives = allCollisionPrimitives;
         }
 
         return tasks;
