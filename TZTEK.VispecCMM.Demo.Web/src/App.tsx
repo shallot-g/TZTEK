@@ -5,6 +5,7 @@ import {
   ChevronRight,
   Download,
   Eye,
+  EyeOff,
   FileBox,
   FolderOpen,
   Gauge,
@@ -41,6 +42,7 @@ export default function App() {
   const [query, setQuery] = useState('')
   const [selectedFeatureId, setSelectedFeatureId] = useState<string>()
   const [selectedFeatureIds, setSelectedFeatureIds] = useState<string[]>([])
+  const [selectedFeaturesIsolationMode, setSelectedFeaturesIsolationMode] = useState(false)
   const [savedFeatureIds, setSavedFeatureIds] = useState<string[]>([])
   const [aiAssistEnabled, setAiAssistEnabled] = useState(false)
   const [drawingFile, setDrawingFile] = useState<File>()
@@ -61,6 +63,10 @@ export default function App() {
   const [cameraView, setCameraView] = useState('iso')
   const fileInput = useRef<HTMLInputElement>(null)
   const drawingInput = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    if (selectedFeatureIds.length === 0) setSelectedFeaturesIsolationMode(false)
+  }, [selectedFeatureIds.length])
 
   useEffect(() => {
     getExamples().then(values => {
@@ -427,6 +433,16 @@ export default function App() {
               <span>人工选择路径</span>
             </div>
             <div className="camera-controls">
+              <button
+                className={`isolation-button ${selectedFeaturesIsolationMode ? 'active' : ''}`}
+                disabled={selectedFeatureIds.length === 0}
+                onClick={() => setSelectedFeaturesIsolationMode(value => !value)}
+                title={selectedFeatureIds.length === 0 ? '请先勾选需要查看的基元' : selectedFeaturesIsolationMode ? '恢复正常图层显示' : '仅显示已勾选基元'}
+                aria-pressed={selectedFeaturesIsolationMode}
+              >
+                {selectedFeaturesIsolationMode ? <EyeOff size={15} /> : <Eye size={15} />}
+                <span>{selectedFeaturesIsolationMode ? '退出隔离显示' : '显示勾选基元'}</span>
+              </button>
               {['top', 'front', 'side', 'iso'].map(view => (
                 <button key={view} className={`view-button ${cameraView === view ? 'active' : ''}`} onClick={() => setCameraView(view)}>
                   {view === 'top' ? '顶' : view === 'front' ? '前' : view === 'side' ? '侧' : '轴测'}
@@ -458,6 +474,8 @@ export default function App() {
                 plan={plan}
                 currentStep={currentStep}
                 selectedFeatureId={selectedFeatureId}
+                selectedFeatureIds={selectedFeatureIds}
+                selectedFeaturesIsolationMode={selectedFeaturesIsolationMode}
                 layers={layers}
                 cameraView={cameraView}
                 onSelectFeature={setSelectedFeatureId}
