@@ -46,8 +46,12 @@ internal sealed class StructuredPrimitiveDto
     public bool? IsClosed { get; set; }
     public int? Degree { get; set; }
     public List<double[]> Vertices { get; set; } = [];
+    public List<double[]> VertexNormals { get; set; } = [];
     public List<int[]> Triangles { get; set; } = [];
     public string? SurfaceType { get; set; }
+    public int? SampleU { get; set; }
+    public int? SampleV { get; set; }
+    public bool? SampleClosedU { get; set; }
 }
 
 internal sealed class StructuredToleranceDto

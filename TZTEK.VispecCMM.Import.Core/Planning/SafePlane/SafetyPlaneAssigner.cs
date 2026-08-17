@@ -216,6 +216,7 @@ internal static class SafetyPlaneAssigner
         if (context.CollisionPrimitives.Count == 0)
             return false;
 
+        var holes = HollowCollisionIndex.Build(context.CollisionPrimitives);
         var options = context.Options;
         if (options.CollisionPrimitives.Count == 0)
             options.CollisionPrimitives = context.CollisionPrimitives;
@@ -228,22 +229,24 @@ internal static class SafetyPlaneAssigner
         var step = new MeasurementStep
         {
             StepType = MeasurementStepType.Movement,
-            MovementKind = "Return to safety plane",
+            // 归属打分必须检测穿体，不能复用“出特征”段——那会把当前待测面从碰撞体中排除。
+            MovementKind = "Safety plane candidate",
             TargetItem = context.TargetItem
         };
 
-        foreach (var box in CollisionBoxBuilder.Build(task, step, options))
+        foreach (var box in CollisionBoxBuilder.Build(task, step, options, excludeTargetPrimitive: false))
         {
             if (!SegmentCollisionChecker.IntersectsBox(box, approach, safeOnFace))
                 continue;
 
             if (options.EnablePrimitiveNarrowPhaseCollisionCheck
                 && box.Primitive is not null
-                && !SegmentCollisionChecker.IntersectsPrimitiveNarrowPhase(
+                && !SegmentCollisionChecker.IntersectsPrimitive(
                     box.Primitive,
                     approach,
                     safeOnFace,
-                    box.Margin))
+                    box.Margin,
+                    holes))
             {
                 continue;
             }

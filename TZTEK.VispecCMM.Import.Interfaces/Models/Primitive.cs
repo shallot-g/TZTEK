@@ -185,6 +185,8 @@ public sealed class ConePrimitive : Primitive, IConePrimitive
     public double? RefRadius { get; set; }
     public double? RadiusStart { get; set; }
     public double? RadiusEnd { get; set; }
+    public bool? IsInnerSurface { get; set; }
+    public string? SurfaceOrientation { get; set; }
 
     public override (double X, double Y, double Z) GetRepresentativePoint()
     {
@@ -237,8 +239,13 @@ public sealed class Surface3DPrimitive : Primitive, ISurface3DPrimitive
 {
     public override PrimitiveType PrimitiveType => PrimitiveType.Surface3D;
     public IReadOnlyList<(double X, double Y, double Z)> Vertices { get; set; } = [];
+    public IReadOnlyList<(double X, double Y, double Z)> VertexNormals { get; set; } = [];
     public IReadOnlyList<(int V0, int V1, int V2)> Triangles { get; set; } = [];
     public string? SurfaceType { get; set; }
+    public bool? IsInnerSurface { get; set; }
+    public int? SampleU { get; set; }
+    public int? SampleV { get; set; }
+    public bool? SampleClosedU { get; set; }
 
     public override (double X, double Y, double Z) GetRepresentativePoint()
     {

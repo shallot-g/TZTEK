@@ -88,7 +88,13 @@ internal static class VisualizationMapper
             RadialReference = primitive is CylinderPrimitive { RadialReferenceX: not null, RadialReferenceY: not null, RadialReferenceZ: not null } referenceCylinder
                 ? [referenceCylinder.RadialReferenceX.Value, referenceCylinder.RadialReferenceY.Value, referenceCylinder.RadialReferenceZ.Value]
                 : null,
-            IsInnerSurface = primitive is CylinderPrimitive orientedCylinder ? orientedCylinder.IsInnerSurface : null,
+            IsInnerSurface = primitive switch
+            {
+                CylinderPrimitive innerCylinder => innerCylinder.IsInnerSurface,
+                ConePrimitive innerCone => innerCone.IsInnerSurface,
+                Surface3DPrimitive innerSurface => innerSurface.IsInnerSurface,
+                _ => null
+            },
             SourceElementIds = primitive is CylinderPrimitive sourceCylinder
                 ? sourceCylinder.SourceElementIds
                 : [primitive.SourceElementId],

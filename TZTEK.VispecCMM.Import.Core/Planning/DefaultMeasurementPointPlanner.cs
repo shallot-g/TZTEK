@@ -189,7 +189,7 @@ internal sealed class DefaultMeasurementPointPlanner : IMeasurementPointPlanner
                 var fraction = levelCount == 1 ? 0.5 : 0.2 + 0.6 * level / (levelCount - 1);
                 var center = Add(startCenter, Scale(Subtract(endCenter, startCenter), fraction));
                 var radius = rStart + (rEnd - rStart) * fraction;
-                points.AddRange(PlanCircularPoints(center, axis, u, v, Math.Max(radius, 0.25), radialCount, 0, Math.PI * 2));
+                points.AddRange(PlanConeRing(center, axis, u, v, Math.Max(radius, 0.25), rStart, rEnd, length, radialCount, cone.IsInnerSurface == true));
             }
         }
         else
@@ -201,7 +201,7 @@ internal sealed class DefaultMeasurementPointPlanner : IMeasurementPointPlanner
                 var levelDistance = distanceFromApex * (level + 1);
                 var radius = Math.Max(0.5, Math.Tan(cone.HalfAngleRad) * levelDistance);
                 var center = Add((cone.ApexX, cone.ApexY, cone.ApexZ), Scale(axis, levelDistance));
-                points.AddRange(PlanCircularPoints(center, axis, u, v, radius, radialCount, 0, Math.PI * 2));
+                points.AddRange(PlanConeRing(center, axis, u, v, radius, 0, radius, levelDistance, radialCount, cone.IsInnerSurface == true));
             }
         }
 
@@ -230,31 +230,70 @@ internal sealed class DefaultMeasurementPointPlanner : IMeasurementPointPlanner
 
     private static List<MeasurementPoint> PlanSurface(Surface3DPrimitive surface)
     {
-        // Use sampled surface vertices when available; fall back to centre point.
-        if (surface.Vertices.Count > 1)
+        if (surface.Vertices.Count == 0)
         {
-            // Estimate a normal from the first three non-collinear vertices.
-            (double X, double Y, double Z) normal = (0.0, 0.0, 1.0);
-            if (surface.Vertices.Count >= 3)
-            {
-                var a = surface.Vertices[0];
-                var b = surface.Vertices[1];
-                var c = surface.Vertices[2];
-                var u = (b.X - a.X, b.Y - a.Y, b.Z - a.Z);
-                var v = (c.X - a.X, c.Y - a.Y, c.Z - a.Z);
-                var cn = Cross(u, v);
-                normal = Normalize(cn);
-            }
-            return surface.Vertices
-                .Select(vtx => CreatePoint(vtx.X, vtx.Y, vtx.Z, normal.X, normal.Y, normal.Z))
-                .ToList<MeasurementPoint>();
+            var fallback = surface.GetRepresentativePoint();
+            return [CreatePoint(fallback.X, fallback.Y, fallback.Z, 0, 0, 1)];
         }
 
-        var point = surface.GetRepresentativePoint();
-        return
-        [
-            CreatePoint(point.X, point.Y, point.Z, 0, 0, 1)
-        ];
+        var normals = surface.VertexNormals.Count == surface.Vertices.Count
+            ? surface.VertexNormals
+            : EstimateSurfaceNormals(surface.Vertices);
+
+        return surface.Vertices
+            .Select((vertex, index) =>
+            {
+                var normal = normals[index];
+                return CreatePoint(vertex.X, vertex.Y, vertex.Z, normal.X, normal.Y, normal.Z);
+            })
+            .ToList();
+    }
+
+    private static List<(double X, double Y, double Z)> EstimateSurfaceNormals(
+        IReadOnlyList<(double X, double Y, double Z)> vertices)
+    {
+        var normals = new List<(double X, double Y, double Z)>(vertices.Count);
+        for (var i = 0; i < vertices.Count; i++)
+        {
+            var previous = vertices[i == 0 ? vertices.Count - 1 : i - 1];
+            var current = vertices[i];
+            var next = vertices[i == vertices.Count - 1 ? 0 : i + 1];
+            var tangentA = Subtract(current, previous);
+            var tangentB = Subtract(next, current);
+            var estimated = Cross(tangentA, tangentB);
+            normals.Add(Length(estimated) < 1e-12 ? (0, 0, 1) : Normalize(estimated));
+        }
+
+        return normals;
+    }
+
+    private static List<MeasurementPoint> PlanConeRing(
+        (double X, double Y, double Z) center,
+        (double X, double Y, double Z) axis,
+        (double X, double Y, double Z) u,
+        (double X, double Y, double Z) v,
+        double radius,
+        double radiusStart,
+        double radiusEnd,
+        double length,
+        int count,
+        bool inner)
+    {
+        var points = new List<MeasurementPoint>();
+        var axial = Math.Max(length, 1e-9);
+        var slope = radiusEnd - radiusStart;
+        for (var i = 0; i < count; i++)
+        {
+            var angle = Math.PI * 2 * i / count;
+            var radial = Normalize(Add(Scale(u, Math.Cos(angle)), Scale(v, Math.Sin(angle))));
+            var point = Add(center, Scale(radial, radius));
+            var contactNormal = Normalize(Add(Scale(radial, axial), Scale(axis, -slope)));
+            if (inner)
+                contactNormal = Scale(contactNormal, -1);
+            points.Add(CreatePoint(point.X, point.Y, point.Z, contactNormal.X, contactNormal.Y, contactNormal.Z));
+        }
+
+        return points;
     }
 
     private static List<MeasurementPoint> PlanCircularPoints(
@@ -276,7 +315,9 @@ internal sealed class DefaultMeasurementPointPlanner : IMeasurementPointPlanner
             var angle = startAngle + (endAngle - startAngle) * fraction;
             var offset = Add(Scale(u, Math.Cos(angle) * radius), Scale(v, Math.Sin(angle) * radius));
             var point = Add(center, offset);
-            points.Add(CreatePoint(point.X, point.Y, point.Z, normal.X, normal.Y, normal.Z));
+            var radial = Normalize(offset);
+            var contactNormal = Length(offset) < 1e-12 ? normal : radial;
+            points.Add(CreatePoint(point.X, point.Y, point.Z, contactNormal.X, contactNormal.Y, contactNormal.Z));
         }
 
         return points;

@@ -334,6 +334,17 @@ def step_face_geometry(
         geometry["uMin"] = u_min
         geometry["uMax"] = u_max
         geometry["angularSpanRad"] = max(0.0, u_max - u_min)
+        orientation = face.wrapped.Orientation()
+        geometry["surfaceOrientation"] = (
+            "Reversed" if orientation == topabs_reversed
+            else "Forward" if orientation == topabs_forward
+            else "Unknown"
+        )
+        geometry["isInnerSurface"] = (
+            True if orientation == topabs_reversed
+            else False if orientation == topabs_forward
+            else None
+        )
         return geometry
 
     if surface_type == "SPHERE":
@@ -342,30 +353,38 @@ def step_face_geometry(
         geometry["radius"] = float(sphere.Radius())
         return geometry
 
-    # For freeform surfaces, sample a grid of 3-D points so that
-    # Surface3D primitives have enough geometry for measurement.
-    sample_count = 5
-    pts = []
-    try:
-        from OCP.gp import gp_Pnt
-        u_min = float(adaptor.FirstUParameter())
-        u_max = float(adaptor.LastUParameter())
-        v_min = float(adaptor.FirstVParameter())
-        v_max = float(adaptor.LastVParameter())
-        for ui in range(sample_count):
-            u = u_min + (u_max - u_min) * ui / max(sample_count - 1, 1)
-            for vi in range(sample_count):
-                v = v_min + (v_max - v_min) * vi / max(sample_count - 1, 1)
-                try:
-                    pt = gp_Pnt()
-                    adaptor.D0(u, v, pt)
-                    pts.append([pt.X(), pt.Y(), pt.Z()])
-                except Exception:
-                    pass
-    except Exception:
-        pass
+    # Freeform / extrusion / torus: sample the trimmed face with local normals
+    # so approach points can leave the surface along the real contact direction.
+    sample_u, sample_v = (8, 3) if surface_type in {"EXTRUSION", "REVOLUTION", "TORUS"} else (5, 5)
+    full_v = surface_type in {"EXTRUSION", "REVOLUTION", "TORUS"}
+    pts, normals, closed_u = sample_surface_grid(
+        adaptor, face, topabs_reversed, sample_u, sample_v, full_v=full_v
+    )
     if pts:
         geometry["samplePoints"] = pts
+        geometry["sampleNormals"] = normals
+        if len(pts) == sample_u * sample_v:
+            geometry["sampleU"] = sample_u
+            geometry["sampleV"] = sample_v
+            geometry["sampleClosedU"] = closed_u
+
+    orientation = face.wrapped.Orientation()
+    geometry["surfaceOrientation"] = (
+        "Reversed" if orientation == topabs_reversed
+        else "Forward" if orientation == topabs_forward
+        else "Unknown"
+    )
+    inward = infer_inward_tube(pts, normals) if pts else None
+    if inward is True:
+        geometry["isInnerSurface"] = True
+    elif inward is False:
+        geometry["isInnerSurface"] = False
+    else:
+        geometry["isInnerSurface"] = (
+            True if orientation == topabs_reversed
+            else False if orientation == topabs_forward
+            else None
+        )
 
     return geometry
 
@@ -421,6 +440,8 @@ def primitive_from_step_face(element_id: str, surface_type: str, geometry: dict[
             "endAngleRad": geometry.get("uMax"),
             "angularSpanRad": geometry.get("angularSpanRad"),
             "refRadius": geometry.get("refRadius"),
+            "surfaceOrientation": geometry.get("surfaceOrientation"),
+            "isInnerSurface": geometry.get("isInnerSurface"),
             "area": geometry.get("area"),
         }
 
@@ -434,27 +455,104 @@ def primitive_from_step_face(element_id: str, surface_type: str, geometry: dict[
             "area": geometry.get("area"),
         }
 
-    if surface_type in {"BSPLINE", "BEZIER", "OFFSET", "OTHER", "UNKNOWN"}:
-        center = geometry.get("center", [0.0, 0.0, 0.0])
-        return {
-            "id": element_id,
-            "type": "Surface3D",
-            "sourceElementId": element_id,
-            "surfaceType": surface_type,
-            "vertices": geometry.get("samplePoints", [center]),
-            "triangles": [],
-            "area": geometry.get("area"),
-        }
-
+    center = geometry.get("center", [0.0, 0.0, 0.0])
+    vertices = geometry.get("samplePoints") or [center]
     return {
         "id": element_id,
         "type": "Surface3D",
         "sourceElementId": element_id,
         "surfaceType": surface_type,
-        "vertices": [geometry.get("center", [0.0, 0.0, 0.0])],
+        "vertices": vertices,
+        "vertexNormals": geometry.get("sampleNormals") or [],
         "triangles": [],
         "area": geometry.get("area"),
+        "isInnerSurface": geometry.get("isInnerSurface"),
+        "surfaceOrientation": geometry.get("surfaceOrientation"),
+        "sampleU": geometry.get("sampleU"),
+        "sampleV": geometry.get("sampleV"),
+        "sampleClosedU": geometry.get("sampleClosedU"),
     }
+
+
+def sample_surface_grid(
+    adaptor: Any,
+    face: Any,
+    topabs_reversed: Any,
+    sample_u: int,
+    sample_v: int,
+    full_v: bool = False,
+) -> tuple[list[list[float]], list[list[float]], bool]:
+    pts: list[list[float]] = []
+    normals: list[list[float]] = []
+    closed_u = False
+    try:
+        from OCP.gp import gp_Pnt, gp_Vec  # type: ignore
+
+        u_min = float(adaptor.FirstUParameter())
+        u_max = float(adaptor.LastUParameter())
+        v_min = float(adaptor.FirstVParameter())
+        v_max = float(adaptor.LastVParameter())
+        orientation = face.wrapped.Orientation()
+        u_span = u_max - u_min
+        v_span = v_max - v_min
+        closed_u = False
+        try:
+            closed_u = bool(adaptor.IsUClosed()) or bool(adaptor.IsUPeriodic())
+        except Exception:
+            closed_u = False
+        closed_u = closed_u or abs(abs(u_span) - math.tau) < 0.05 or abs(abs(u_span) - 2 * math.pi) < 0.05
+        use_full_v = full_v or closed_u
+
+        for ui in range(sample_u):
+            u_frac = ui / sample_u if closed_u else ui / max(sample_u - 1, 1)
+            u = u_min + u_span * u_frac
+            for vi in range(sample_v):
+                if sample_v <= 1:
+                    v_frac = 0.5
+                elif use_full_v:
+                    v_frac = vi / max(sample_v - 1, 1)
+                else:
+                    v_frac = 0.2 + 0.6 * vi / max(sample_v - 1, 1)
+                v = v_min + v_span * v_frac
+                try:
+                    point = gp_Pnt()
+                    d1u = gp_Vec()
+                    d1v = gp_Vec()
+                    adaptor.D1(u, v, point, d1u, d1v)
+                    normal = d1u.Crossed(d1v)
+                    if normal.Magnitude() < 1e-12:
+                        continue
+                    normal.Normalize()
+                    if orientation == topabs_reversed:
+                        normal.Reverse()
+                    pts.append([point.X(), point.Y(), point.Z()])
+                    normals.append([normal.X(), normal.Y(), normal.Z()])
+                except Exception:
+                    continue
+    except Exception:
+        return [], [], False
+
+    return pts, normals, closed_u
+
+
+def infer_inward_tube(points: list[list[float]], normals: list[list[float]]) -> bool | None:
+    """Return True when sample normals point toward the vertex centroid (inner wall)."""
+    if len(points) < 6 or len(points) != len(normals):
+        return None
+
+    centroid = [sum(point[index] for point in points) / len(points) for index in range(3)]
+    inward = 0
+    for point, normal in zip(points, normals):
+        radial = [point[index] - centroid[index] for index in range(3)]
+        if radial[0] * normal[0] + radial[1] * normal[1] + radial[2] * normal[2] < 0:
+            inward += 1
+
+    ratio = inward / len(points)
+    if ratio >= 0.8:
+        return True
+    if ratio <= 0.2:
+        return False
+    return None
 
 
 def candidate_role(surface_type: str) -> str:

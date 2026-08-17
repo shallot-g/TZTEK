@@ -17,4 +17,7 @@
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="8.0.2" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="TZTEK.VispecCMM.Import.Core.Tests" />
+  </ItemGroup>
 </Project>

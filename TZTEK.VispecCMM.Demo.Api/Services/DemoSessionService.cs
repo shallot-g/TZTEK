@@ -388,7 +388,7 @@ public sealed class DemoSessionService
         EnableAutoGlobalSafeGoto = true,
         EnableInterFeatureAutoGoto = true,
         EnablePrimitiveNarrowPhaseCollisionCheck = true,
-        CollisionSafetyMarginMm = 0.3,
+        CollisionSafetyMarginMm = 0,
         SafetyClearanceMm = 2.0,
         AutoSafeGotoExtraClearanceMm = 1.0
     };

@@ -28,7 +28,7 @@ public sealed class MeasurementPlanOptions
     public bool TreatProbeAsPoint { get; set; } = true;
     public IReadOnlyList<GotoPoint> UserGotoPoints { get; set; } = [];
     public IReadOnlyList<Primitive> CollisionPrimitives { get; set; } = [];
-    public double CollisionSafetyMarginMm { get; set; } = 0.3;
+    public double CollisionSafetyMarginMm { get; set; }
     public double AutoSafeGotoExtraClearanceMm { get; set; } = 1.0;
     public ToleranceStandard ToleranceStandard { get; set; } = ToleranceStandard.ASME;
     public NamingRule? NamingRule { get; set; }

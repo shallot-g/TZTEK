@@ -28,6 +28,8 @@ internal sealed class DefaultCollisionChecker : ICollisionChecker
             };
         }
 
+        var primitives = CollisionPrimitiveSource.Resolve(task, options);
+        var holes = HollowCollisionIndex.Build(primitives);
         var boxes = CollisionBoxBuilder.Build(task, movementStep, options).ToList();
         var collisions = new List<CollisionEvent>();
 
@@ -38,7 +40,7 @@ internal sealed class DefaultCollisionChecker : ICollisionChecker
 
             if (options.EnablePrimitiveNarrowPhaseCollisionCheck
                 && box.Primitive is not null
-                && !SegmentCollisionChecker.IntersectsPrimitiveNarrowPhase(box.Primitive, start, end, box.Margin))
+                && !SegmentCollisionChecker.IntersectsPrimitive(box.Primitive, start, end, box.Margin, holes))
             {
                 continue;
             }

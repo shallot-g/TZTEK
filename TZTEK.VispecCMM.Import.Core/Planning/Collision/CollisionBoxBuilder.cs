@@ -16,27 +16,40 @@ internal static class CollisionBoxBuilder
     public static IEnumerable<CollisionBox> Build(
         MeasurementTask task,
         MeasurementStep movementStep,
-        MeasurementPlanOptions options)
+        MeasurementPlanOptions options,
+        bool excludeTargetPrimitive = true)
     {
-        var margin = (options.TreatProbeAsPoint ? 0 : ResolveProbeRadius(movementStep))
-            + Math.Max(0, options.CollisionSafetyMarginMm);
+        var inflation = ResolveInflation(movementStep, options);
         var target = movementStep.TargetItem?.Primitive;
         var transitKind = PathMovementClassifier.Classify(movementStep);
 
         return CollisionPrimitiveSource.Resolve(task, options)
-            .Where(primitive => !ShouldExcludePrimitive(target, primitive, transitKind))
+            .Where(primitive => !ShouldExcludePrimitive(target, primitive, transitKind, excludeTargetPrimitive))
+            .Where(IsCollisionSurface)
             .DistinctBy(primitive => primitive.Id)
-            .Select(primitive => TryBuildBox(primitive, margin))
+            .Select(primitive => TryBuildBox(primitive, inflation))
             .Where(box => box is not null)
             .Select(box => box!.Value);
     }
 
+    public static double ResolveInflation(MeasurementStep movementStep, MeasurementPlanOptions options) =>
+        (options.TreatProbeAsPoint ? 0 : ResolveProbeRadius(movementStep))
+        + Math.Max(0, options.CollisionSafetyMarginMm);
+
+    private static bool IsCollisionSurface(Primitive primitive) =>
+        primitive is PlanePrimitive
+            or CylinderPrimitive
+            or ConePrimitive
+            or SpherePrimitive
+            or Surface3DPrimitive;
+
     private static bool ShouldExcludePrimitive(
         Primitive? target,
         Primitive candidate,
-        CollisionTransitKind transitKind)
+        CollisionTransitKind transitKind,
+        bool excludeTargetPrimitive)
     {
-        if (target is null)
+        if (!excludeTargetPrimitive || target is null)
             return false;
 
         if (!string.Equals(target.Id, candidate.Id, StringComparison.OrdinalIgnoreCase))
@@ -47,75 +60,85 @@ internal static class CollisionBoxBuilder
             or CollisionTransitKind.IntraFeature;
     }
 
-    private static CollisionBox? TryBuildBox(Primitive primitive, double margin) =>
+    private static CollisionBox? TryBuildBox(Primitive primitive, double inflation) =>
         primitive switch
         {
-            PlanePrimitive plane => BuildPlaneBox(plane, margin),
-            CylinderPrimitive cylinder => BuildCylinderBox(cylinder, margin),
-            SpherePrimitive sphere => BuildSphereBox(sphere, margin),
-            Surface3DPrimitive surface => BuildSurfaceBox(surface, margin),
-            CirclePrimitive circle => BuildPointBox(circle.Id, circle, circle.CenterX, circle.CenterY, circle.CenterZ, circle.Radius + margin, margin),
-            ArcPrimitive arc => BuildPointBox(arc.Id, arc, arc.CenterX, arc.CenterY, arc.CenterZ, arc.Radius + margin, margin),
-            LinePrimitive line => BuildLineBox(line, margin),
-            PointPrimitive point => BuildPointBox(point.Id, point, point.X, point.Y, point.Z, margin, margin),
-            ConePrimitive cone => BuildPointBox(cone.Id, cone, cone.ApexX, cone.ApexY, cone.ApexZ, 10 + margin, margin),
+            PlanePrimitive plane => BuildPlaneBox(plane, inflation),
+            CylinderPrimitive cylinder => BuildCylinderBox(cylinder, inflation),
+            SpherePrimitive sphere => BuildSphereBox(sphere, inflation),
+            Surface3DPrimitive surface => BuildSurfaceBox(surface, inflation),
+            ConePrimitive cone => BuildConeBox(cone, inflation),
             _ => null
         };
 
-    private static CollisionBox BuildPlaneBox(PlanePrimitive plane, double margin)
+    private static CollisionBox BuildPlaneBox(PlanePrimitive plane, double inflation)
     {
-        var spread = Math.Max(1.0, Math.Sqrt(plane.SourceAreaMm2 ?? 100.0) * 0.5) + margin;
-        var halfThickness = 2.0 + margin;
+        var origin = new CollisionVectors.Vec3(plane.PointX, plane.PointY, plane.PointZ);
+        var normal = CollisionVectors.Normalize(new CollisionVectors.Vec3(plane.NormalX, plane.NormalY, plane.NormalZ));
+        var radius = CollisionGeometry.FaceRadius(plane) + inflation;
+        var pad = Math.Max(inflation, 1e-6);
         return new CollisionBox(
             plane.Id,
             plane,
-            margin,
-            plane.PointX - spread,
-            plane.PointY - spread,
-            plane.PointZ - halfThickness,
-            plane.PointX + spread,
-            plane.PointY + spread,
-            plane.PointZ + halfThickness);
+            inflation,
+            origin.X - CollisionVectors.DiskExtent(normal.X, radius) - pad,
+            origin.Y - CollisionVectors.DiskExtent(normal.Y, radius) - pad,
+            origin.Z - CollisionVectors.DiskExtent(normal.Z, radius) - pad,
+            origin.X + CollisionVectors.DiskExtent(normal.X, radius) + pad,
+            origin.Y + CollisionVectors.DiskExtent(normal.Y, radius) + pad,
+            origin.Z + CollisionVectors.DiskExtent(normal.Z, radius) + pad);
     }
 
-    private static CollisionBox BuildCylinderBox(CylinderPrimitive cylinder, double margin)
+    private static CollisionBox BuildCylinderBox(CylinderPrimitive cylinder, double inflation)
     {
-        var radius = cylinder.Radius + margin;
-        if (cylinder.AxisStartX is not null && cylinder.AxisEndX is not null)
-        {
-            return new CollisionBox(
-                cylinder.Id,
-                cylinder,
-                margin,
-                Math.Min(cylinder.AxisStartX.Value, cylinder.AxisEndX.Value) - radius,
-                Math.Min(cylinder.AxisStartY.Value, cylinder.AxisEndY.Value) - radius,
-                Math.Min(cylinder.AxisStartZ.Value, cylinder.AxisEndZ.Value) - radius,
-                Math.Max(cylinder.AxisStartX.Value, cylinder.AxisEndX.Value) + radius,
-                Math.Max(cylinder.AxisStartY.Value, cylinder.AxisEndY.Value) + radius,
-                Math.Max(cylinder.AxisStartZ.Value, cylinder.AxisEndZ.Value) + radius);
-        }
+        if (!CollisionGeometry.TryGetCylinderAxis(cylinder, out var start, out var end, out var axis, out _))
+            return BuildPointBox(cylinder.Id, cylinder, cylinder.AxisPointX, cylinder.AxisPointY, cylinder.AxisPointZ, cylinder.Radius + inflation, inflation);
 
-        var center = new CollisionVectors.Vec3(cylinder.AxisPointX, cylinder.AxisPointY, cylinder.AxisPointZ);
-        var half = (cylinder.Length ?? cylinder.Radius * 2) / 2 + margin;
+        return BuildFiniteWallBox(cylinder.Id, cylinder, start, end, axis, cylinder.Radius, inflation);
+    }
+
+    private static CollisionBox? BuildConeBox(ConePrimitive cone, double inflation)
+    {
+        if (!CollisionGeometry.TryGetConeAxis(cone, out var start, out var end, out var axis, out _, out var radiusStart, out var radiusEnd))
+            return null;
+
+        return BuildFiniteWallBox(cone.Id, cone, start, end, axis, Math.Max(radiusStart, radiusEnd), inflation);
+    }
+
+    private static CollisionBox BuildFiniteWallBox(
+        string id,
+        Primitive primitive,
+        CollisionVectors.Vec3 start,
+        CollisionVectors.Vec3 end,
+        CollisionVectors.Vec3 axis,
+        double radius,
+        double inflation)
+    {
+        var grown = radius + inflation;
+        var pad = Math.Max(inflation, 1e-6);
+        var extentX = Math.Abs(end.X - start.X) / 2 + CollisionVectors.DiskExtent(axis.X, grown) + pad;
+        var extentY = Math.Abs(end.Y - start.Y) / 2 + CollisionVectors.DiskExtent(axis.Y, grown) + pad;
+        var extentZ = Math.Abs(end.Z - start.Z) / 2 + CollisionVectors.DiskExtent(axis.Z, grown) + pad;
+        var center = CollisionVectors.Scale(CollisionVectors.Add(start, end), 0.5);
         return new CollisionBox(
-            cylinder.Id,
-            cylinder,
-            margin,
-            center.X - radius - half,
-            center.Y - radius - half,
-            center.Z - radius - half,
-            center.X + radius + half,
-            center.Y + radius + half,
-            center.Z + radius + half);
+            id,
+            primitive,
+            inflation,
+            center.X - extentX,
+            center.Y - extentY,
+            center.Z - extentZ,
+            center.X + extentX,
+            center.Y + extentY,
+            center.Z + extentZ);
     }
 
-    private static CollisionBox BuildSphereBox(SpherePrimitive sphere, double margin)
+    private static CollisionBox BuildSphereBox(SpherePrimitive sphere, double inflation)
     {
-        var radius = sphere.Radius + margin;
+        var radius = sphere.Radius + inflation;
         return new CollisionBox(
             sphere.Id,
             sphere,
-            margin,
+            inflation,
             sphere.CenterX - radius,
             sphere.CenterY - radius,
             sphere.CenterZ - radius,
@@ -124,7 +147,7 @@ internal static class CollisionBoxBuilder
             sphere.CenterZ + radius);
     }
 
-    private static CollisionBox? BuildSurfaceBox(Surface3DPrimitive surface, double margin)
+    private static CollisionBox? BuildSurfaceBox(Surface3DPrimitive surface, double inflation)
     {
         if (surface.Vertices.Count == 0)
             return null;
@@ -132,31 +155,13 @@ internal static class CollisionBoxBuilder
         return new CollisionBox(
             surface.Id,
             surface,
-            margin,
-            surface.Vertices.Min(v => v.X) - margin,
-            surface.Vertices.Min(v => v.Y) - margin,
-            surface.Vertices.Min(v => v.Z) - margin,
-            surface.Vertices.Max(v => v.X) + margin,
-            surface.Vertices.Max(v => v.Y) + margin,
-            surface.Vertices.Max(v => v.Z) + margin);
-    }
-
-    private static CollisionBox BuildLineBox(LinePrimitive line, double margin)
-    {
-        var end = new CollisionVectors.Vec3(
-            line.StartX + line.DirX,
-            line.StartY + line.DirY,
-            line.StartZ + line.DirZ);
-        return new CollisionBox(
-            line.Id,
-            line,
-            margin,
-            Math.Min(line.StartX, end.X) - margin,
-            Math.Min(line.StartY, end.Y) - margin,
-            Math.Min(line.StartZ, end.Z) - margin,
-            Math.Max(line.StartX, end.X) + margin,
-            Math.Max(line.StartY, end.Y) + margin,
-            Math.Max(line.StartZ, end.Z) + margin);
+            inflation,
+            surface.Vertices.Min(v => v.X) - inflation,
+            surface.Vertices.Min(v => v.Y) - inflation,
+            surface.Vertices.Min(v => v.Z) - inflation,
+            surface.Vertices.Max(v => v.X) + inflation,
+            surface.Vertices.Max(v => v.Y) + inflation,
+            surface.Vertices.Max(v => v.Z) + inflation);
     }
 
     private static CollisionBox BuildPointBox(
@@ -166,8 +171,8 @@ internal static class CollisionBoxBuilder
         double y,
         double z,
         double spread,
-        double margin) =>
-        new(id, primitive, margin, x - spread, y - spread, z - spread, x + spread, y + spread, z + spread);
+        double inflation) =>
+        new(id, primitive, inflation, x - spread, y - spread, z - spread, x + spread, y + spread, z + spread);
 
     private static double ResolveProbeRadius(MeasurementStep step)
     {

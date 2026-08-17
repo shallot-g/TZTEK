@@ -194,7 +194,16 @@ public sealed class PrimitiveToleranceExtractor : IPrimitiveToleranceExtractor
                 SourceElementId = element.Id,
                 Apex = ReadPoint(geometry, "apex"),
                 AxisDirection = ReadPoint(geometry, "axisDirection") ?? ReadPoint(geometry, "axisDir"),
-                HalfAngleRad = ReadDouble(geometry, "halfAngleRad")
+                AxisStart = ReadPoint(geometry, "axisStart"),
+                AxisEnd = ReadPoint(geometry, "axisEnd"),
+                HalfAngleRad = ReadDouble(geometry, "halfAngleRad"),
+                Length = ReadDouble(geometry, "length"),
+                RadiusStart = ReadDouble(geometry, "radiusStart"),
+                RadiusEnd = ReadDouble(geometry, "radiusEnd"),
+                RefRadius = ReadDouble(geometry, "refRadius"),
+                IsInnerSurface = ReadBool(geometry, "isInnerSurface"),
+                SurfaceOrientation = ReadString(geometry, "surfaceOrientation"),
+                Area = ReadDouble(geometry, "area")
             },
             _ => null
         };
@@ -499,7 +508,9 @@ public sealed class PrimitiveToleranceExtractor : IPrimitiveToleranceExtractor
             AngularSpanRad = dto.AngularSpanRad,
             RefRadius = dto.RefRadius,
             RadiusStart = dto.RadiusStart,
-            RadiusEnd = dto.RadiusEnd
+            RadiusEnd = dto.RadiusEnd,
+            IsInnerSurface = dto.IsInnerSurface,
+            SurfaceOrientation = dto.SurfaceOrientation
         };
     }
 
@@ -524,11 +535,16 @@ public sealed class PrimitiveToleranceExtractor : IPrimitiveToleranceExtractor
             Name = name,
             SourceElementId = sourceElementId,
             Vertices = dto.Vertices.Select(point => (Get(point, 0), Get(point, 1), Get(point, 2))).ToList(),
+            VertexNormals = dto.VertexNormals.Select(point => (Get(point, 0), Get(point, 1), Get(point, 2))).ToList(),
             Triangles = dto.Triangles
                 .Where(triangle => triangle.Length >= 3)
                 .Select(triangle => (triangle[0], triangle[1], triangle[2]))
                 .ToList(),
-            SurfaceType = dto.SurfaceType
+            SurfaceType = dto.SurfaceType,
+            IsInnerSurface = dto.IsInnerSurface,
+            SampleU = dto.SampleU,
+            SampleV = dto.SampleV,
+            SampleClosedU = dto.SampleClosedU
         };
     }
 
