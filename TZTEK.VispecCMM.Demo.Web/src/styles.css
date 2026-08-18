@@ -70,19 +70,6 @@ button:disabled { opacity: 0.42; cursor: default; }
 .icon-text-button span { overflow: hidden; text-overflow: ellipsis; }
 .primary-button { background: #168b7e; border-color: #25a99a; font-weight: 600; }
 .primary-button:hover:not(:disabled) { background: #1a9b8d; border-color: #48c0b3; }
-.example-control { display: flex; align-items: center; }
-.example-control select {
-  height: 34px;
-  min-width: 150px;
-  max-width: 210px;
-  border: 1px solid #39424c;
-  border-right: 0;
-  border-radius: 5px 0 0 5px;
-  background: #20262d;
-  color: #dce3e8;
-  padding: 0 8px;
-}
-.example-control .icon-button { border-radius: 0 5px 5px 0; }
 .prototype-badge { font-size: 11px; color: #f0c66b; border: 1px solid #65552f; background: #2a2518; padding: 5px 8px; border-radius: 4px; white-space: nowrap; }
 
 .summary-strip {
@@ -226,5 +213,4 @@ button:disabled { opacity: 0.42; cursor: default; }
   .detail-panel { display: none; }
   .timeline-panel { grid-template-columns: 150px minmax(0, 1fr); }
   .current-step-data { display: none; }
-  .example-control select { min-width: 110px; }
 }

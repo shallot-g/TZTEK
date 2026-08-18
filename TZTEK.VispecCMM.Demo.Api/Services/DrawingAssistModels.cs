@@ -10,6 +10,9 @@ public sealed class DrawingAssistResponse
     public int Progress { get; init; } = 100;
     public int TargetCount { get; init; }
     public int RecommendedCount { get; init; }
+    public int RawRecommendationCount { get; init; }
+    public int FilteredPlaneRecommendationCount { get; init; }
+    public int FinalRecommendationCount { get; init; }
     public int LowConfidenceCount { get; init; }
     public IReadOnlyList<AiFeatureRecommendation> Recommendations { get; init; } = [];
     public string? RequestId { get; init; }

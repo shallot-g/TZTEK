@@ -37,6 +37,9 @@ export interface DrawingAssistResult {
   recommendations: AiFeatureRecommendation[]
   targetCount: number
   recommendedCount: number
+  rawRecommendationCount: number
+  filteredPlaneRecommendationCount: number
+  finalRecommendationCount: number
   lowConfidenceCount: number
   requestId?: string
   elapsedMilliseconds: number

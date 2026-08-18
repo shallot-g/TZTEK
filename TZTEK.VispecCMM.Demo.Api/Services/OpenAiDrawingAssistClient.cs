@@ -10,7 +10,7 @@ namespace TZTEK.VispecCMM.Demo.Api.Services;
 
 public sealed class OpenAiDrawingAssistClient : IDrawingAssistProvider
 {
-    private const string PromptVersion = "drawing-assist-v4-gpt-5.6";
+    private const string PromptVersion = "drawing-assist-v5-gpt-5.6-non-planar-priority";
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private readonly HttpClient _httpClient;
     private readonly ILogger<OpenAiDrawingAssistClient> _logger;

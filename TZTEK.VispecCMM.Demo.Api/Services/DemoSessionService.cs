@@ -173,11 +173,26 @@ public sealed class DemoSessionService
             entry.Dto.DrawingAssistStatus = "MatchingFeatures";
             entry.Dto.DrawingAssistProgress = 75;
             var allowed = features.Select(feature => feature.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
-            var recommendations = model.Recommendations
+            var rawRecommendations = model.Recommendations.ToList();
+            var allowedRecommendations = rawRecommendations
                 .Where(item => allowed.Contains(item.FeatureId))
                 .GroupBy(item => item.FeatureId, StringComparer.OrdinalIgnoreCase)
                 .Select(group => group.OrderByDescending(item => item.Confidence).First())
                 .ToList();
+            var filteredPlaneCount = allowedRecommendations.Count(item =>
+                features.FirstOrDefault(feature => string.Equals(feature.Id, item.FeatureId, StringComparison.OrdinalIgnoreCase))?.Type
+                    .Equals("Plane", StringComparison.OrdinalIgnoreCase) == true);
+            var recommendations = allowedRecommendations
+                .Where(item => !string.Equals(
+                    features.FirstOrDefault(feature => string.Equals(feature.Id, item.FeatureId, StringComparison.OrdinalIgnoreCase))?.Type,
+                    "Plane",
+                    StringComparison.OrdinalIgnoreCase))
+                .ToList();
+
+            if (filteredPlaneCount > 0)
+                _logger.LogInformation(
+                    "Drawing assist filtered plane recommendations provider={Provider} raw={RawCount} filteredPlanes={FilteredPlaneCount} final={FinalCount}",
+                    model.Provider, rawRecommendations.Count, filteredPlaneCount, recommendations.Count);
 
             // AI 只更新建议选择；用户仍需手动点击“生成测量路径”。
             entry.Dto.AiRecommendations = recommendations;
@@ -193,12 +208,15 @@ public sealed class DemoSessionService
             {
                 Provider = model.Provider,
                 Status = "Completed",
-                Message = model.Warnings.Count == 0
+                Message = model.Warnings.Count == 0 && filteredPlaneCount == 0
                     ? $"{providerName} 已完成整页图纸与 STEP 基元推荐，请审核自动勾选结果。"
-                    : $"{providerName} 已完成部分页面识别，存在 {model.Warnings.Count} 条警告，请审核推荐结果。",
+                    : $"{providerName} 已完成识别，过滤了 {filteredPlaneCount} 个平面推荐，并存在 {model.Warnings.Count} 条页面警告，请审核推荐结果。",
                 Progress = 100,
                 TargetCount = model.TargetCount,
                 RecommendedCount = recommendations.Count,
+                RawRecommendationCount = rawRecommendations.Count,
+                FilteredPlaneRecommendationCount = filteredPlaneCount,
+                FinalRecommendationCount = recommendations.Count,
                 LowConfidenceCount = recommendations.Count(item => item.Status == "NeedsReview"),
                 Recommendations = recommendations,
                 RequestId = model.RequestId,

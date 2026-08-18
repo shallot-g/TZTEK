@@ -49,6 +49,44 @@ test('圆柱使用有限曲面范围生成基元和测点', async () => {
   expect(outwardDistance).toBeGreaterThan(0)
 })
 
+test('批量选择只作用于当前搜索结果', async ({ page }) => {
+  await page.goto(`/?session=${sessionId}`)
+  const search = page.getByPlaceholder('搜索名称或类型')
+  const selectAll = page.getByRole('button', { name: '全选', exact: true })
+  const clear = page.getByRole('button', { name: '清空', exact: true })
+  const rows = page.locator('.feature-row')
+  await expect(rows.first()).toBeVisible()
+
+  const hiddenFeature = sessionResult.features.find((feature: any) =>
+    !`${feature.name} ${feature.type}`.toLowerCase().includes('cy'))
+  expect(hiddenFeature).toBeTruthy()
+  await page.getByRole('checkbox', { name: `选择 ${hiddenFeature.name}` }).check()
+
+  await search.fill('CY')
+  const visibleRows = page.locator('.feature-row')
+  const visibleCount = await visibleRows.count()
+  expect(visibleCount).toBeGreaterThan(0)
+  await expect(page.getByText(new RegExp(`显示：${visibleCount} / 已识别：`))).toBeVisible()
+
+  await selectAll.click()
+  await expect(visibleRows.locator('input[type="checkbox"]:checked')).toHaveCount(visibleCount)
+  await expect(selectAll).toBeDisabled()
+
+  await clear.click()
+  await expect(visibleRows.locator('input[type="checkbox"]:checked')).toHaveCount(0)
+  await expect(clear).toBeDisabled()
+
+  await search.fill('')
+  await expect(page.getByRole('checkbox', { name: `选择 ${hiddenFeature.name}` })).toBeChecked()
+
+  await search.fill('no-such-feature')
+  await expect(page.getByText('没有匹配的基元')).toBeVisible()
+  await expect(selectAll).toBeDisabled()
+  await expect(clear).toBeDisabled()
+  await expect(page.getByLabel('示例文件')).toHaveCount(0)
+  await expect(page.getByTitle('加载示例')).toHaveCount(0)
+})
+
 for (const viewport of [
   { width: 1366, height: 768 },
   { width: 1440, height: 900 },

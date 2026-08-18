@@ -18,9 +18,9 @@ import {
   Trash2,
   Upload,
 } from 'lucide-react'
-import { clearMeasurementPlan, createExampleSession, createUploadSession, deleteDrawing, generateMeasurementPlan, getDrawingAssistProviders, getExamples, getSession, saveFeatureSelection, setAiAssist, startDrawingAssist, uploadDrawing } from './api'
+import { clearMeasurementPlan, createUploadSession, deleteDrawing, generateMeasurementPlan, getDrawingAssistProviders, getSession, saveFeatureSelection, setAiAssist, startDrawingAssist, uploadDrawing } from './api'
 import Viewer from './Viewer'
-import type { DemoExample, DemoSession, DrawingAssistProvider, DrawingAssistProviderId, LayerState, VisualizationFeature, VisualizationResult } from './types'
+import type { DemoSession, DrawingAssistProvider, DrawingAssistProviderId, LayerState, VisualizationFeature, VisualizationResult } from './types'
 
 const defaultLayers: LayerState = {
   workpiece: true,
@@ -33,8 +33,6 @@ const defaultLayers: LayerState = {
 }
 
 export default function App() {
-  const [examples, setExamples] = useState<DemoExample[]>([])
-  const [exampleId, setExampleId] = useState('cylinder')
   const [file, setFile] = useState<File>()
   const [session, setSession] = useState<DemoSession>()
   const [result, setResult] = useState<VisualizationResult>()
@@ -67,13 +65,6 @@ export default function App() {
   useEffect(() => {
     if (selectedFeatureIds.length === 0) setSelectedFeaturesIsolationMode(false)
   }, [selectedFeatureIds.length])
-
-  useEffect(() => {
-    getExamples().then(values => {
-      setExamples(values)
-      if (values.length && !values.some(value => value.id === exampleId)) setExampleId(values[0].id)
-    }).catch(() => setExamples([]))
-  }, [])
 
   useEffect(() => {
     getDrawingAssistProviders().then(setDrawingAssistProviders).catch(() => setDrawingAssistProviders([]))
@@ -173,10 +164,6 @@ export default function App() {
     await startSession(() => createUploadSession(file))
   }
 
-  const startExample = async () => {
-    await startSession(() => createExampleSession(exampleId))
-  }
-
   const startSession = async (factory: () => Promise<DemoSession>) => {
     setError('')
     setResult(undefined)
@@ -202,8 +189,10 @@ export default function App() {
       setError('')
     } catch (reason) { setError(reason instanceof Error ? reason.message : '保存选择失败') }
   }
-  const selectAllFeatures = () => { if (result) setSelectedFeatureIds(result.features.map(feature => feature.id)) }
-  const clearSelection = () => setSelectedFeatureIds([])
+  const visibleFeatureIds = filteredFeatures.map(feature => feature.id)
+  const visibleSelectedCount = visibleFeatureIds.filter(id => selectedFeatureIds.includes(id)).length
+  const selectAllFeatures = () => setSelectedFeatureIds(current => Array.from(new Set([...current, ...visibleFeatureIds])))
+  const clearSelection = () => setSelectedFeatureIds(current => current.filter(id => !visibleFeatureIds.includes(id)))
   const generatePlan = async () => {
     if (!session || selectedFeatureIds.length === 0) return
     try {
@@ -320,7 +309,7 @@ export default function App() {
           </div>
         </div>
 
-        <div className="file-actions">
+          <div className="file-actions">
           <input
             ref={fileInput}
             type="file"
@@ -340,14 +329,6 @@ export default function App() {
           <button className="icon-text-button" disabled={!result} onClick={saveSelection}>保存选择</button>
           <button className="primary-button" disabled={!result || selectedFeatureIds.length === 0 || session?.status === 'Processing' || isGeneratingPlan} onClick={generatePlan}>{isGeneratingPlan ? '正在生成…' : '生成测量路径'}</button>
           <button className="icon-button" disabled={!result?.optimizedPlan.statistics.featureCount} onClick={clearPlan} title="清除路径"><RotateCcw size={17} /></button>
-          <div className="example-control">
-            <select value={exampleId} onChange={event => setExampleId(event.target.value)} aria-label="示例文件">
-              {examples.map(example => <option key={example.id} value={example.id}>{example.name}</option>)}
-            </select>
-            <button className="icon-button" disabled={!examples.length} onClick={startExample} title="加载示例">
-              <FileBox size={18} />
-            </button>
-          </div>
         </div>
 
         <div className="topbar-tools">
@@ -404,11 +385,11 @@ export default function App() {
           <div className="panel-heading">
             <div>
               <h2>识别元素</h2>
-              <span>已识别：{result?.features.length ?? 0} · 已选择：{selectedFeatureIds.length}</span>
+              <span>显示：{filteredFeatures.length} / 已识别：{result?.features.length ?? 0} · 已选择：{selectedFeatureIds.length}</span>
             </div>
             <div className="feature-selection-tools">
-              <button onClick={selectAllFeatures} disabled={!result?.features.length}>全选</button>
-              <button onClick={clearSelection} disabled={selectedFeatureIds.length === 0}>清空</button>
+              <button onClick={selectAllFeatures} disabled={visibleFeatureIds.length === 0 || visibleSelectedCount === visibleFeatureIds.length}>全选</button>
+              <button onClick={clearSelection} disabled={visibleFeatureIds.length === 0 || visibleSelectedCount === 0}>清空</button>
             </div>
           </div>
           <div className="selection-status">
@@ -423,7 +404,8 @@ export default function App() {
             {measurementFeatures.map(feature => <FeatureRow key={feature.id} feature={feature} selected={feature.id === selectedFeatureId} checked={selectedFeatureIds.includes(feature.id)} onSelect={setSelectedFeatureId} onToggle={toggleFeature} />)}
             {rawFeatures.length > 0 && <div className="feature-group-label">原始 CAD 曲面</div>}
             {rawFeatures.map(feature => <FeatureRow key={feature.id} feature={feature} selected={feature.id === selectedFeatureId} checked={selectedFeatureIds.includes(feature.id)} onSelect={setSelectedFeatureId} onToggle={toggleFeature} />)}
-            {!result && <EmptyList />}
+             {!result && <EmptyList />}
+             {result && filteredFeatures.length === 0 && <div className="panel-empty">没有匹配的基元</div>}
           </div>
         </aside>
 
