@@ -159,6 +159,7 @@ internal static class VisualizationMapper
     {
         var result = new List<VisualizationPathSegmentDto>();
         (double X, double Y, double Z)? previous = null;
+        var currentProbeDirection = new[] { 0.0, 0.0, 1.0 };
 
         foreach (var step in task.Steps)
         {
@@ -166,11 +167,16 @@ internal static class VisualizationMapper
             {
                 var end = (step.GotoTarget.X, step.GotoTarget.Y, step.GotoTarget.Z);
                 var start = previous;
+                var reachesTargetSafetyPlane = IsTargetSafetyPlaneArrival(step) && step.IsExecutable;
+                var directionAfterStep = reachesTargetSafetyPlane
+                    ? GetTargetProbeDirection(step) ?? currentProbeDirection
+                    : currentProbeDirection;
 
                 if (start is not null)
-                    result.Add(MapSegment(step, start.Value, end, "Movement"));
+                    result.Add(MapSegment(step, start.Value, end, "Movement", directionAfterStep));
 
                 previous = end;
+                currentProbeDirection = directionAfterStep;
                 continue;
             }
 
@@ -178,7 +184,7 @@ internal static class VisualizationMapper
             {
                 var end = (point.X, point.Y, point.Z);
                 if (previous is not null)
-                    result.Add(MapSegment(step, previous.Value, end, "Measurement"));
+                    result.Add(MapSegment(step, previous.Value, end, "Measurement", currentProbeDirection));
                 previous = end;
             }
         }
@@ -186,6 +192,69 @@ internal static class VisualizationMapper
         for (var i = 0; i < result.Count; i++)
             result[i] = result[i] with { Sequence = i + 1 };
         return result;
+    }
+
+    private static bool IsTargetSafetyPlaneArrival(MeasurementStep step) =>
+        step.Name.Contains("Move to first feature on safety plane", StringComparison.OrdinalIgnoreCase)
+        || step.Name.Contains("Transit to next feature on safety plane", StringComparison.OrdinalIgnoreCase);
+
+    private static double[]? GetTargetProbeDirection(MeasurementStep step)
+    {
+        var safetyDirection = NormalizeDirection(step.SafetyPlane?.GetDirection());
+        if (safetyDirection is null)
+            return null;
+
+        var targetDirection = safetyDirection;
+        if (step.TargetItem?.Primitive is CylinderPrimitive { IsInnerSurface: true } cylinder
+            && IsFullCylinder(cylinder))
+        {
+            var cylinderAxis = NormalizeDirection((cylinder.AxisDirX, cylinder.AxisDirY, cylinder.AxisDirZ));
+            if (cylinderAxis is not null)
+            {
+                var dot = cylinderAxis[0] * safetyDirection[0]
+                    + cylinderAxis[1] * safetyDirection[1]
+                    + cylinderAxis[2] * safetyDirection[2];
+                targetDirection = dot < 0
+                    ? [-cylinderAxis[0], -cylinderAxis[1], -cylinderAxis[2]]
+                    : cylinderAxis;
+            }
+        }
+
+        return IsNegativeZ(targetDirection)
+            ? [0.0, 0.0, 1.0]
+            : targetDirection;
+    }
+
+    private static bool IsNegativeZ(double[] direction) =>
+        Math.Abs(direction[0]) <= 1e-6
+        && Math.Abs(direction[1]) <= 1e-6
+        && direction[2] < 0;
+
+    private static bool IsFullCylinder(CylinderPrimitive cylinder) =>
+        cylinder.AngularSpanRad is null
+        || cylinder.AngularSpanRad.Value >= Math.PI * 2 - 1e-3;
+
+    private static double[]? NormalizeDirection((double I, double J, double K)? direction)
+    {
+        if (direction is null
+            || !double.IsFinite(direction.Value.I)
+            || !double.IsFinite(direction.Value.J)
+            || !double.IsFinite(direction.Value.K))
+            return null;
+
+        var length = Math.Sqrt(
+            direction.Value.I * direction.Value.I
+            + direction.Value.J * direction.Value.J
+            + direction.Value.K * direction.Value.K);
+        if (length <= 1e-12)
+            return null;
+
+        return
+        [
+            direction.Value.I / length,
+            direction.Value.J / length,
+            direction.Value.K / length
+        ];
     }
 
     private static bool IsApproachToApproachTransit(MeasurementStep step)
@@ -204,7 +273,8 @@ internal static class VisualizationMapper
         MeasurementStep step,
         (double X, double Y, double Z) start,
         (double X, double Y, double Z) end,
-        string kind)
+        string kind,
+        double[] probeDirection)
     {
         var reason = step.GotoTarget?.Reason;
         var isAuto = step.CollisionValidated && step.MovementKind is
@@ -225,6 +295,8 @@ internal static class VisualizationMapper
             Kind = kind,
             Name = step.Name,
             FeatureId = step.TargetItem?.Primitive.Id,
+            SafetyPlaneId = step.SafetyPlane?.Id,
+            ProbeDirection = [.. probeDirection],
             Start = [start.X, start.Y, start.Z],
             End = [end.X, end.Y, end.Z],
             IsGoto = isGoto,

@@ -164,6 +164,8 @@ export interface PathSegment {
   kind: 'Movement' | 'Measurement'
   name: string
   featureId?: string
+  safetyPlaneId?: string
+  probeDirection?: Vec3
   start: Vec3
   end: Vec3
   isGoto: boolean

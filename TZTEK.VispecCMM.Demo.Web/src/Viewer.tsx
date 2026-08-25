@@ -266,6 +266,10 @@ export default function Viewer({ result, plan, currentStep, selectedFeatureId, s
       state.active.geometry = geometry
       ;(state.active.material as THREE.LineBasicMaterial).color.setHex(segment.hasRisk ? colors.risk : segment.isGoto ? colors.goto : segment.kind === 'Measurement' ? colors.measurement : colors.selected)
       state.probe.position.set(...(segment.isExecutable ? segment.end : segment.start))
+      state.probe.quaternion.setFromUnitVectors(
+        new THREE.Vector3(0, 0, 1),
+        resolveSegmentProbeDirection(plan.segments, index),
+      )
       state.probe.visible = true
     } else {
       state.probe.visible = false
@@ -350,6 +354,25 @@ function createProbe(diameter: number, length: number) {
   stem.position.z = Math.max(length, 8) / 2
   group.add(ball, stem)
   return group
+}
+
+function resolveSegmentProbeDirection(segments: PathPlan['segments'], index: number) {
+  for (let current = index; current >= 0; current--) {
+    const direction = segments[current]?.probeDirection
+    if (!direction || !direction.every(Number.isFinite)) continue
+
+    const vector = new THREE.Vector3(...direction)
+    if (vector.lengthSq() <= 1e-12) continue
+
+    vector.normalize()
+    if (Math.abs(vector.x) <= 1e-6 && Math.abs(vector.y) <= 1e-6 && vector.z < 0) {
+      return new THREE.Vector3(0, 0, 1)
+    }
+
+    return vector
+  }
+
+  return new THREE.Vector3(0, 0, 1)
 }
 
 function createPointLabel(text: string) {

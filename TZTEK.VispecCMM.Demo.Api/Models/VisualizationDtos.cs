@@ -135,6 +135,9 @@ public sealed record VisualizationPathSegmentDto
     public string Kind { get; init; } = string.Empty;
     public string Name { get; init; } = string.Empty;
     public string? FeatureId { get; init; }
+    public string? SafetyPlaneId { get; init; }
+    /// <summary>探针到达该路径段终点后应保持的显示方向。</summary>
+    public double[]? ProbeDirection { get; init; }
     public double[] Start { get; init; } = [0, 0, 0];
     public double[] End { get; init; } = [0, 0, 0];
     public bool IsGoto { get; init; }
